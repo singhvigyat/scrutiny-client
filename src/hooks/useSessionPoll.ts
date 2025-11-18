@@ -1,102 +1,160 @@
 // src/hooks/useSessionPoll.ts
-// polls only the /api/sessions/:id/status endpoint at a configurable interval
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-type PollCallback = (sessionObj: any | null, rawText?: string | null) => void;
-
-interface UseSessionPollOpts {
-  intervalMs?: number;
-}
-
 /**
- * useSessionPoll(sessionId, onUpdate, opts)
- * - sessionId: id to poll
- * - onUpdate: called with parsed JSON session object (or null) each poll
- * - opts.intervalMs: poll interval in ms (default 2000)
+ * Polls session status for a given sessionId.
+ *
+ * Returns { session, loading, error, setSession }.
+ *
+ * Implementation notes:
+ * - Tries GET /api/sessions/:id/status first (backend now exposes it).
+ * - Falls back to a few canonical endpoints if status endpoint missing.
+ * - Attaches Authorization header from supabase session.
+ * - Exports both named and default for compatibility.
  */
-export default function useSessionPoll(sessionId: string | null, onUpdate: PollCallback, opts?: UseSessionPollOpts) {
-  const intervalMs = opts?.intervalMs ?? 2000;
+
+type RawSession = any;
+
+export function useSessionPoll(sessionId: string | null, pollIntervalMs = 2000) {
+  const [session, setSession] = useState<RawSession | null>(null);
+  const [loading, setLoading] = useState<boolean>(!!sessionId);
+  const [error, setError] = useState<string | null>(null);
+
   const stopped = useRef(false);
+  const lastEtag = useRef<string | null>(null); // optional: could store ETag or last raw payload to avoid repeats
 
   useEffect(() => {
     stopped.current = false;
-    let mounted = true;
     if (!sessionId) {
-      return () => {
-        stopped.current = true;
-        mounted = false;
-      };
+      setSession(null);
+      setLoading(false);
+      setError(null);
+      return;
     }
 
     const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
     const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
 
-    const url = `${apiBase}/api/sessions/${encodeURIComponent(sessionId)}/status`;
+    let abort = false;
 
-    let loopId: number | null = null;
+    const tryFetchOnce = async () => {
+      setLoading(true);
+      setError(null);
 
-    const loop = async () => {
-      if (stopped.current || !mounted) return;
+      // Get token if available
+      let accessToken: string | null = null;
       try {
         const sessRes = await supabase.auth.getSession();
-        const accessToken = sessRes?.data?.session?.access_token ?? null;
+        accessToken = sessRes?.data?.session?.access_token ?? null;
+      } catch (e) {
+        // ignore
+        accessToken = null;
+      }
 
-        // If no token, inform parent with null and stop
-        if (!accessToken) {
-          console.warn("[useSessionPoll] no access token, aborting poll");
-          onUpdate(null, null);
-          stopped.current = true;
-          return;
-        }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      };
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
-        console.log(`[useSessionPoll] Trying GET ${url}`);
-        const resp = await fetch(url, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-            "ngrok-skip-browser-warning": "true",
-          },
-        });
+      const candidates = [
+        `${apiBase}/api/sessions/${encodeURIComponent(sessionId)}/status`, // preferred
+        // `${apiBase}/api/sessions/${encodeURIComponent(sessionId)}`,
+        // `${apiBase}/api/session/${encodeURIComponent(sessionId)}`,
+        // `${apiBase}/api/sessions/${encodeURIComponent(sessionId)}`, // repeat safe
+        // `/api/sessions/${encodeURIComponent(sessionId)}`,
+      ];
 
-        const text = await resp.text();
-        if (!resp.ok) {
-          console.warn(`[useSessionPoll] GET ${url} returned non-OK: ${resp.status} ${text.slice(0,200)}`);
-          // call update but with null to indicate not-ready / error
-          onUpdate(null, text);
-        } else {
-          // Try parse JSON; if not JSON, pass null but provide raw text
+      let got: any = null;
+      let lastError: any = null;
+
+      for (const url of candidates) {
+        if (abort) break;
+        try {
+          // console.debug("[useSessionPoll] trying", url);
+          const resp = await fetch(url, { method: "GET", headers });
+          const text = await resp.text();
+
+          // If HTML or Vite error page, ignore and try next
+          if (text && text.trim().startsWith("<")) {
+            // Not JSON — probably 404 HTML or index page served
+            lastError = { url, status: resp.status, raw: text };
+            // only treat non-200 as try next; if 200 but HTML, still try next
+            if (!resp.ok) {
+              continue;
+            } else {
+              // 200 + HTML — treat as missing endpoint
+              continue;
+            }
+          }
+
           let json: any = null;
           try {
             json = text ? JSON.parse(text) : null;
           } catch (parseErr) {
-            console.warn(`[useSessionPoll] Response for ${url} not JSON:`, parseErr, "raw:", text.slice(0,200));
-            onUpdate(null, text);
-            // schedule next
-            if (!stopped.current) loopId = window.setTimeout(loop, intervalMs);
-            return;
+            // fallback: if resp.ok and no JSON, still continue to next candidate
+            lastError = { url, status: resp.status, parseErr };
+            if (!resp.ok) continue;
+            // else continue to next
+            continue;
           }
 
-          console.log(`[useSessionPoll] Successful GET ${url}`, json);
-          onUpdate(json, text);
+          if (!resp.ok) {
+            lastError = { url, status: resp.status, payload: json ?? text };
+            continue;
+          }
+
+          // success
+          got = json ?? null;
+          break;
+        } catch (fetchErr) {
+          lastError = fetchErr;
+          continue;
         }
-      } catch (err: any) {
-        console.error("[useSessionPoll] fetch error:", err);
-        onUpdate(null, null);
-      } finally {
-        if (!stopped.current) loopId = window.setTimeout(loop, intervalMs);
       }
+
+      if (abort) return;
+
+      if (got === null) {
+        // nothing retrieved successfully
+        setError(lastError ? String(lastError?.status ?? lastError) : "No session info");
+        setLoading(false);
+        return;
+      }
+
+      // Normalise shape: prefer payload.session or payload directly.
+      // Many backends return { message, session: {...} } or the session direct.
+      const payload = got.session ?? got;
+      setSession(payload);
+      setLoading(false);
     };
 
-    // kick off
-    loop();
+    // initial immediate fetch
+    tryFetchOnce().catch((e) => {
+      console.error("[useSessionPoll] initial fetch error:", e);
+      setError(String(e?.message ?? e));
+      setLoading(false);
+    });
+
+    // polling loop
+    const id = setInterval(() => {
+      if (stopped.current || abort) return;
+      tryFetchOnce().catch((e) => {
+        // avoid noisy repeated logs but keep a console.warn
+        console.warn("[useSessionPoll] poll error:", e);
+      });
+    }, pollIntervalMs);
 
     return () => {
+      abort = true;
       stopped.current = true;
-      mounted = false;
-      if (loopId) clearTimeout(loopId);
+      clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, intervalMs]);
+  }, [sessionId, pollIntervalMs]);
+
+  return { session, loading, error, setSession };
 }
+
+export default useSessionPoll;

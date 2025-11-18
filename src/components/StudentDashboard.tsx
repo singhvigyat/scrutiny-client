@@ -295,9 +295,9 @@ export default function StudentDashboard(): React.ReactElement {
                 <div className="mb-6">
                   <LobbyView
                     sessionId={currentSessionId}
+                    role="student"
                     onSessionStarted={handleSessionStarted}
                     onSessionUpdate={handleSessionUpdate}
-                    pollIntervalMs={2000}
                   />
                 </div>
               )}
