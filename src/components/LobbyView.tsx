@@ -13,15 +13,113 @@ interface Props {
 const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
 const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
 
+type RawSession = any;
+
+function normalizeSession(raw: RawSession) {
+  if (!raw) return null;
+
+  // session id
+  const id = raw.id ?? raw.sessionId ?? raw.session_id ?? raw.session?.id ?? null;
+
+  // quiz id
+  const quizId =
+    raw.quizId ??
+    raw.quiz_id ??
+    raw.quiz?.id ??
+    raw.quiz?.quizId ??
+    raw.quiz?.quiz_id ??
+    raw.quizId ??
+    raw.quiz ??
+    null;
+
+  // participants
+  const participants = raw.participants ?? raw.users ?? raw.participantList ?? [];
+
+  // status
+  const status = (raw.status ?? raw.state ?? "").toString();
+
+  // start/end times
+  const startsAt = raw.startsAt ?? raw.startTime ?? raw.start_time ?? raw.starts_at ?? raw.session?.startsAt ?? raw.session?.startTime ?? null;
+  const endsAt = raw.endsAt ?? raw.endTime ?? raw.end_time ?? raw.ends_at ?? raw.session?.endsAt ?? raw.session?.endTime ?? null;
+
+  const pin = raw.pin ?? raw.pinCode ?? raw.code ?? raw.session?.pin ?? null;
+
+  return {
+    ...raw,
+    id,
+    quizId,
+    participants,
+    status,
+    startsAt,
+    endsAt,
+    pin,
+  };
+}
+
 export default function LobbyView({ sessionId, role, onClose, onSessionStarted }: Props): React.ReactElement {
   const { session, loading, error, setSession } = useSessionPoll(sessionId);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // If the session becomes active, notify parent (so students can open quiz)
+  // If the session becomes active, fetch canonical session details (to ensure we have quizId etc)
   useEffect(() => {
-    if (session?.status === "active") {
-      onSessionStarted?.(session);
+    // only react to status === active
+    if (!session) return;
+    const sStatus = (session.status ?? session.state ?? "").toString().toLowerCase();
+
+    if (sStatus === "active") {
+      console.log("[LobbyView] detected active session from poll:", session);
+
+      // Fetch full session details to normalize fields before notifying parent
+      (async () => {
+        try {
+          const sessRes = await supabase.auth.getSession();
+          const accessToken = sessRes?.data?.session?.access_token ?? null;
+          if (!accessToken) {
+            console.warn("[LobbyView] no access token when fetching session details");
+            // still pass normalized poll session if nothing else
+            const normalized = normalizeSession(session);
+            onSessionStarted?.(normalized);
+            return;
+          }
+
+          const resp = await fetch(`${apiBase}/api/sessions/${encodeURIComponent(sessionId)}`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+              "ngrok-skip-browser-warning": "true",
+            },
+          });
+
+          const text = await resp.text();
+          let json: any = null;
+          try {
+            json = text ? JSON.parse(text) : null;
+          } catch (parseErr) {
+            console.warn("[LobbyView] could not parse session GET response:", parseErr, "raw:", text);
+            json = null;
+          }
+
+          if (!resp.ok) {
+            console.warn("[LobbyView] GET /api/sessions/:id returned non-OK:", resp.status, text);
+            // fallback to poll-provided session, normalized
+            const normalized = normalizeSession(session);
+            onSessionStarted?.(normalized);
+            return;
+          }
+
+          const full = json?.session ?? json ?? session;
+          const normalized = normalizeSession(full);
+          console.log("[LobbyView] fetched full session details (normalized):", normalized);
+          onSessionStarted?.(normalized);
+        } catch (err: any) {
+          console.error("[LobbyView] error fetching full session details:", err);
+          // fallback: pass normalized poll session
+          const normalized = normalizeSession(session);
+          onSessionStarted?.(normalized);
+        }
+      })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.status]);
@@ -54,7 +152,7 @@ export default function LobbyView({ sessionId, role, onClose, onSessionStarted }
         setActionLoading(false);
         return;
       }
-      // Update local session (server will also be polled)
+      // update local session; polling will catch up too
       setSession(json ?? session);
       console.log("[LobbyView] started session:", json);
     } catch (err: any) {
