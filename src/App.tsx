@@ -1,6 +1,6 @@
 // src/App.tsx
 import React, { useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from "react-router-dom";
 
 // Auth context + provider
 import { AuthProvider, useAuthContext } from "./auth/AuthProvider";
@@ -16,9 +16,8 @@ import TeacherDashboard from "./components/TeacherDashboard";
 type View = "sign-in" | "sign-up";
 
 /**
- * A small protected route wrapper.
- * - If no user, redirects to /signin (preserves intended location in state).
- * - If allowedRoles provided, checks user.user_metadata.role and redirects to /signin if not allowed.
+ * ProtectedRoute uses the role from AuthContext (not Supabase user metadata).
+ * It also respects roleLoading to avoid racing.
  */
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactElement; allowedRoles?: string[] }) {
   const { user, role, roleLoading } = useAuthContext();
@@ -33,20 +32,25 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactEleme
   }
 
   if (!user) {
-    // not logged in
     return <Navigate to="/signin" replace state={{ from: location }} />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(role!)) {
-    return <Navigate to="/" replace />;
+  if (allowedRoles && allowedRoles.length > 0) {
+    if (!role || !allowedRoles.includes(role)) {
+      // logged in but wrong role — redirect to appropriate dashboard if role present
+      if (role === "student") return <Navigate to="/student" replace />;
+      if (role === "teacher") return <Navigate to="/teacher" replace />;
+      return <Navigate to="/" replace />;
+    }
   }
 
   return children;
 }
 
-// Simple protected dashboard shown when user is present (keeps your original small dashboard)
+// Simple protected dashboard shown when user is present
 function SmallDashboard() {
-  const { user } = useAuthContext();
+  const { user, setRole } = useAuthContext();
+  const navigate = useNavigate();
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
@@ -55,30 +59,29 @@ function SmallDashboard() {
           Welcome, {user?.user_metadata?.full_name || user?.email}
         </h1>
 
-        <p className="mt-3 text-slate-600 text-sm">
-          You are logged in. This is your secure dashboard.
-        </p>
+        <p className="mt-3 text-slate-600 text-sm">You are logged in. This is your secure dashboard.</p>
 
         <div className="mt-6 flex gap-2">
           <button
             onClick={async () => {
               const { supabase } = await import("./lib/supabaseClient");
               await supabase.auth.signOut();
-              localStorage.removeItem('role');
-              // navigate('/');
+              setRole(null); // clear persisted role & context
+              // navigate to signin explicitly to ensure UI updates
+              navigate("/signin");
             }}
             className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md"
           >
             Sign out
           </button>
 
-          {/* quick navigation to role dashboards (if role present) */}
-          {user?.user_metadata?.role === "student" && (
-            <Link to="/student" className="px-4 py-2 bg-sky-600 text-white rounded-md">Go to Student</Link>
-          )}
-          {user?.user_metadata?.role === "teacher" && (
-            <Link to="/teacher" className="px-4 py-2 bg-indigo-600 text-white rounded-md">Go to Teacher</Link>
-          )}
+          {/* quick navigation to role dashboards (if role present in localStorage) */}
+          <Link to="/student" className="px-4 py-2 bg-sky-600 text-white rounded-md">
+            Go to Student
+          </Link>
+          <Link to="/teacher" className="px-4 py-2 bg-indigo-600 text-white rounded-md">
+            Go to Teacher
+          </Link>
         </div>
       </div>
     </div>
@@ -90,6 +93,7 @@ function AppRoot() {
   const { user, roleLoading } = useAuthContext();
   const [view, setView] = useState<View>("sign-in");
 
+  // Wait for roleLoading to finish to avoid flicker/race
   if (roleLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -98,7 +102,7 @@ function AppRoot() {
     );
   }
 
-  // if logged in, show small dashboard
+  // if logged in, show small dashboard (role is already set in context by SignIn)
   if (user) return <SmallDashboard />;
 
   // not logged in -> show either SignIn or SignUp
@@ -126,7 +130,9 @@ function AppRoot() {
           </div>
 
           <div className="mt-6 text-sm text-sky-100">
-            <p><strong>Tip:</strong> Students enter MIS, teachers enter Employee ID during sign-up.</p>
+            <p>
+              <strong>Tip:</strong> Students enter MIS, teachers enter Employee ID during sign-up.
+            </p>
           </div>
 
           <div className="mt-auto text-xs text-white/60">
@@ -144,9 +150,6 @@ function AppRoot() {
                 <button className="text-sky-600" onClick={() => setView("sign-up")}>
                   Create account
                 </button>
-                <div className="mt-2 text-xs">
-                  Or use the dedicated pages: <Link to="/signin" className="text-sky-600">/signin</Link> · <Link to="/signup" className="text-sky-600">/signup</Link>
-                </div>
               </div>
             </>
           ) : (

@@ -2,77 +2,101 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-interface AuthContextType {
-  user: any;
+type AuthContextType = {
+  user: any | null;
   role: string | null;
   roleLoading: boolean;
-}
+  setRole: (r: string | null) => void;
+};
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   role: null,
   roleLoading: false,
+  setRole: () => {},
 });
 
 export const useAuthContext = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<any>(null);
-  const [role, setRole] = useState<string | null>(null);
+  const [user, setUser] = useState<any | null>(null);
+  const [role, setRoleState] = useState<string | null>(null);
   const [roleLoading, setRoleLoading] = useState(false);
 
+  // setter exposed to let SignIn set the authoritative role immediately
+  const setRole = (r: string | null) => {
+    setRoleState(r);
+    if (typeof window !== "undefined") {
+      if (r) localStorage.setItem("role", r);
+      else localStorage.removeItem("role");
+    }
+  };
+
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("🟠 AuthStateChange:", event, session?.user);
+    let mounted = true;
+
+    // On mount, try to restore session/user and persisted role quickly
+    (async () => {
+      try {
+        const sessRes = await supabase.auth.getSession();
+        const session = sessRes?.data?.session ?? null;
+        if (!mounted) return;
+
+        if (session?.user) {
+          setUser(session.user);
+        } else {
+          setUser(null);
+        }
+
+        // Quickly read persisted role if available (fast path)
+        const savedRole = typeof window !== "undefined" ? localStorage.getItem("role") : null;
+        if (savedRole) {
+          setRoleState(savedRole);
+        }
+      } catch (err) {
+        console.warn("[AuthProvider] getSession failed", err);
+      }
+    })();
+
+    // Subscribe to auth state changes
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      console.log("[AuthProvider] onAuthStateChange:", _event, session?.user ?? null);
 
       if (!session?.user) {
+        // signed out
         setUser(null);
         setRole(null);
-        localStorage.removeItem("role");
         return;
       }
 
       setUser(session.user);
 
-      // if role is already stored, load instantly
-      const savedRole = localStorage.getItem("role");
+      // If a role is already persisted, use that; otherwise leave null
+      const savedRole = typeof window !== "undefined" ? localStorage.getItem("role") : null;
       if (savedRole) {
-        console.log("🟢 Using persisted role:", savedRole);
-        setRole(savedRole);
+        console.log("[AuthProvider] using persisted role:", savedRole);
+        setRoleState(savedRole);
         return;
       }
 
-      // otherwise fetch manually (backend or supabase)
-      setRoleLoading(true);
-
-      try {
-        const token = session.access_token;
-        const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/auth/me`, {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'ngrok-skip-browser-warning': 'true'
-          }
-        });
-
-        const json = await resp.json();
-        const r = json?.user?.role ?? null;
-        console.log("🟢 Loaded role from backend:", r);
-
-        if (r) {
-          localStorage.setItem("role", r);
-        }
-        setRole(r);
-      } finally {
-        setRoleLoading(false);
-      }
+      // Do not eagerly fetch role here — SignIn will set role after contacting backend.
+      // But set roleLoading = false (no background fetch).
+      setRoleLoading(false);
     });
 
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      try {
+        listener?.subscription?.unsubscribe?.();
+      } catch {
+        // ignore
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, role, roleLoading }}>
+    <AuthContext.Provider value={{ user, role, roleLoading, setRole }}>
       {children}
     </AuthContext.Provider>
   );
