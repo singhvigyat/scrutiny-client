@@ -1,381 +1,316 @@
-import React, { useState, useEffect } from 'react';
-import {
-  BookOpen,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  Play,
-  FileText,
-  Trophy,
-  TrendingUp,
-  Calendar,
-  Moon,
-  Sun,
-} from 'lucide-react';
+// src/components/StudentDashboard.tsx
+import React, { useEffect, useState } from "react";
+import { useAuthContext } from "../auth/AuthProvider";
+import { supabase } from "../lib/supabaseClient";
+import { useNavigate } from "react-router-dom";
 
-interface Quiz {
-  id: string;
-  title: string;
-  subject: string;
-  duration: number;
-  totalQuestions: number;
-  dueDate: string;
-  status: 'available' | 'in_progress' | 'completed' | 'missed';
-  score?: number;
+type QuizMeta = {
+  id?: string;
+  quizId?: string;
+  title?: string;
+  subject?: string;
+  duration?: number;
+  totalQuestions?: number;
+  dueDate?: string;
+  status?: string; // available | in_progress | completed | missed | draft | active etc.
   attempts?: number;
-  maxAttempts: number;
-}
+  maxAttempts?: number;
+  assignedTo?: string[] | string;
+  studentsAssigned?: number;
+  createdBy?: string;
+  teacherId?: string;
+  email?: string;
+  [k: string]: any;
+};
 
-interface CompletedQuiz {
-  id: string;
-  title: string;
-  subject: string;
-  score: number;
-  totalQuestions: number;
-  completedAt: string;
-  warnings: number;
-}
+const formatDate = (dateString?: string) => {
+  if (!dateString) return "—";
+  try {
+    const d = new Date(dateString);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return dateString;
+  }
+};
 
-interface Stat {
-  label: string;
-  value: string | number;
-  icon: React.ReactNode;
-  color: string;
-}
+const getDaysRemaining = (dueDate?: string) => {
+  if (!dueDate) return "No due date";
+  const today = new Date();
+  const due = new Date(dueDate);
+  const diffTime = due.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-export const StudentDashboard = () => {
-  const [darkMode, setDarkMode] = useState(false);
+  if (diffDays < 0) return "Overdue";
+  if (diffDays === 0) return "Due today";
+  if (diffDays === 1) return "Due tomorrow";
+  return `${diffDays} days left`;
+};
 
-  useEffect(() => {
-    // Load dark mode preference from localStorage
-    const savedMode = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(savedMode);
-  }, []);
+export default function StudentDashboard(): React.ReactElement {
+  const auth = useAuthContext();
+  const navigate = useNavigate();
+  const [quizzes, setQuizzes] = useState<QuizMeta[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Save dark mode preference to localStorage
-    localStorage.setItem('darkMode', darkMode.toString());
-  }, [darkMode]);
+  const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
+  const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
 
-  const toggleDarkMode = () => {
-    setDarkMode(!darkMode);
-  };
+  const fetchQuizzes = async () => {
+    console.log("[StudentDashboard] fetchQuizzes start");
+    setError(null);
+    setLoading(true);
 
-  // Mock data - replace with real API calls
-  const [availableQuizzes] = useState<Quiz[]>([
-    {
-      id: '1',
-      title: 'Mathematics Mid-Term Exam',
-      subject: 'Mathematics',
-      duration: 60,
-      totalQuestions: 50,
-      dueDate: '2025-11-20',
-      status: 'available',
-      attempts: 0,
-      maxAttempts: 1,
-    },
-    {
-      id: '2',
-      title: 'Physics Quiz - Chapter 5',
-      subject: 'Physics',
-      duration: 30,
-      totalQuestions: 25,
-      dueDate: '2025-11-19',
-      status: 'available',
-      attempts: 0,
-      maxAttempts: 2,
-    },
-    {
-      id: '3',
-      title: 'Chemistry Lab Assessment',
-      subject: 'Chemistry',
-      duration: 45,
-      totalQuestions: 30,
-      dueDate: '2025-11-22',
-      status: 'in_progress',
-      attempts: 1,
-      maxAttempts: 1,
-    },
-  ]);
+    try {
+      const sessRes = await supabase.auth.getSession();
+      const session = sessRes?.data?.session ?? null;
+      const accessToken = session?.access_token ?? null;
 
-  const [completedQuizzes] = useState<CompletedQuiz[]>([
-    {
-      id: '1',
-      title: 'Biology Quiz - Cell Structure',
-      subject: 'Biology',
-      score: 42,
-      totalQuestions: 50,
-      completedAt: '2025-11-15',
-      warnings: 0,
-    },
-    {
-      id: '2',
-      title: 'History Assignment',
-      subject: 'History',
-      score: 38,
-      totalQuestions: 40,
-      completedAt: '2025-11-14',
-      warnings: 1,
-    },
-    {
-      id: '3',
-      title: 'English Literature Quiz',
-      subject: 'English',
-      score: 45,
-      totalQuestions: 50,
-      completedAt: '2025-11-12',
-      warnings: 0,
-    },
-  ]);
+      console.log("[StudentDashboard] token present:", Boolean(accessToken));
+      if (!accessToken) {
+        setError("No access token available. Please sign in.");
+        setLoading(false);
+        return;
+      }
 
-  const stats: Stat[] = [
-    {
-      label: 'Available Quizzes',
-      value: availableQuizzes.filter(q => q.status === 'available').length,
-      icon: <BookOpen className="w-5 h-5 text-blue-600" strokeWidth={2} />,
-      color: 'blue',
-    },
-    {
-      label: 'Completed',
-      value: completedQuizzes.length,
-      icon: <CheckCircle className="w-5 h-5 text-green-600" strokeWidth={2} />,
-      color: 'green',
-    },
-    {
-      label: 'Average Score',
-      value: `${Math.round(completedQuizzes.reduce((sum, q) => sum + (q.score / q.totalQuestions * 100), 0) / completedQuizzes.length)}%`,
-      icon: <Trophy className="w-5 h-5 text-purple-600" strokeWidth={2} />,
-      color: 'purple',
-    },
-    {
-      label: 'Total Warnings',
-      value: completedQuizzes.reduce((sum, q) => sum + q.warnings, 0),
-      icon: <AlertTriangle className="w-5 h-5 text-red-600" strokeWidth={2} />,
-      color: 'red',
-    },
-  ];
+      const resp = await fetch(`${apiBase}/api/quizzes`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "ngrok-skip-browser-warning": "true",
+        },
+      });
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'available':
-        return <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded border border-green-200">Available</span>;
-      case 'in_progress':
-        return <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded border border-yellow-200">In Progress</span>;
-      case 'completed':
-        return <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded border border-blue-200">Completed</span>;
-      case 'missed':
-        return <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded border border-red-200">Missed</span>;
-      default:
-        return null;
+      console.log("[StudentDashboard] GET /api/quizzes status:", resp.status);
+      const text = await resp.text();
+      console.log("[StudentDashboard] GET /api/quizzes raw response:", text);
+
+      let json: any = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (parseErr) {
+        console.warn("[StudentDashboard] could not parse quizzes response as JSON", parseErr);
+      }
+
+      if (!resp.ok) {
+        const errMsg = json?.message ?? text ?? `Status ${resp.status}`;
+        console.error("[StudentDashboard] fetch quizzes failed:", errMsg);
+        setError(String(errMsg));
+        setLoading(false);
+        return;
+      }
+
+      const all: QuizMeta[] = Array.isArray(json) ? json : json?.quizzes ?? json?.data ?? [];
+      console.log("[StudentDashboard] fetched quizzes count:", (all || []).length);
+
+      // Try to determine student identifier
+      const userId = (auth.user as any)?.id ?? (auth.user as any)?.user?.id ?? null;
+      const userEmail = (auth.user as any)?.email ?? (auth.user as any)?.user?.email ?? null;
+      console.log("[StudentDashboard] student identifiers:", { userId, userEmail });
+
+      const filtered = (all || []).filter((q) => {
+        if (!q) return false;
+
+        const status = (q.status ?? "").toString().toLowerCase();
+        const assigned = q.assignedTo ?? q.allowedStudents ?? q.studentIds ?? q.students ?? null;
+
+        // 1) If assigned list exists, check membership
+        if (assigned) {
+          if (Array.isArray(assigned)) {
+            if (userId && assigned.map(String).includes(String(userId))) {
+              console.log("[StudentDashboard] included by assigned array:", q.id);
+              return true;
+            }
+            if (userEmail && assigned.map(String).includes(String(userEmail))) {
+              console.log("[StudentDashboard] included by assigned email in array:", q.id);
+              return true;
+            }
+          } else if (typeof assigned === "string") {
+            const parts = assigned.split?.(",").map((s: string) => s.trim()) ?? [assigned];
+            if (userId && parts.includes(String(userId))) {
+              console.log("[StudentDashboard] included by assigned csv (id):", q.id);
+              return true;
+            }
+            if (userEmail && parts.includes(String(userEmail))) {
+              console.log("[StudentDashboard] included by assigned csv (email):", q.id);
+              return true;
+            }
+          }
+          // assigned exists but student not in it -> exclude
+          console.log("[StudentDashboard] excluded: assigned list present but student not included:", q.id);
+          return false;
+        }
+
+        // 2) If status indicates availability, include
+        if (status === "available" || status === "active") {
+          console.log("[StudentDashboard] included by status:", q.id);
+          return true;
+        }
+
+        // 3) If creatorId exists and is not the student, assume teacher-created quiz intended for students -> include
+        const creator = q.creatorId ?? q.createdBy ?? q.creator_id ?? q.created_by ?? null;
+        if (creator && String(creator) !== String(userId)) {
+          console.log("[StudentDashboard] included: creator present and not the student:", q.id, "creator:", creator);
+          return true;
+        }
+
+        // 4) If there is no owner metadata at all, include (public)
+        const ownerCandidates = [q.teacherId, q.createdBy, q.creatorId, q.ownerId, q.userId, q.instructorId, q.teacher_id, q.created_by, q.creator_id, q.owner_id];
+        const hasOwnerInfo = ownerCandidates.some((c) => c !== undefined && c !== null);
+        if (!hasOwnerInfo) {
+          console.log("[StudentDashboard] included: no owner metadata (public):", q.id);
+          return true;
+        }
+
+        // otherwise exclude
+        console.log("[StudentDashboard] excluded: no assignment, not available, creator==student or owner info present:", q.id);
+        return false;
+      });
+
+      console.log("[StudentDashboard] filtered quizzes count:", filtered.length);
+      setQuizzes(filtered);
+    } catch (err: any) {
+      console.error("[StudentDashboard] fetchQuizzes error:", err);
+      setError(String(err?.message ?? err));
+    } finally {
+      setLoading(false);
+      console.log("[StudentDashboard] fetchQuizzes finished");
     }
   };
 
-  const getScoreColor = (score: number, total: number) => {
-    const percentage = (score / total) * 100;
-    if (percentage >= 80) return 'text-green-600';
-    if (percentage >= 60) return 'text-blue-600';
-    if (percentage >= 40) return 'text-yellow-600';
-    return 'text-red-600';
-  };
+  useEffect(() => {
+    fetchQuizzes().catch((e) => console.error(e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const getDaysRemaining = (dueDate: string) => {
-    const today = new Date();
-    const due = new Date(dueDate);
-    const diffTime = due.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (diffDays < 0) return 'Overdue';
-    if (diffDays === 0) return 'Due today';
-    if (diffDays === 1) return 'Due tomorrow';
-    return `${diffDays} days left`;
+  // Logout handler
+  const handleLogout = async () => {
+    console.log("[StudentDashboard] logout requested");
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error("[StudentDashboard] supabase signOut error:", error);
+      } else {
+        console.log("[StudentDashboard] supabase signOut success");
+      }
+    } catch (err: any) {
+      console.error("[StudentDashboard] signOut threw:", err);
+    } finally {
+      // Clear role in auth context (persisted role in localStorage will be removed by AuthProvider.setRole)
+      try {
+        auth.setRole(null);
+      } catch (e) {
+        console.warn("[StudentDashboard] auth.setRole null failed:", e);
+      }
+      // Clear local UI state
+      setQuizzes([]);
+      setError(null);
+      setLoading(false);
+      // navigate to signin
+      navigate("/signin");
+    }
   };
 
   return (
-    <div className={`h-screen flex flex-col ${darkMode ? 'bg-black' : 'bg-gray-50'}`}>
+    <div className="h-screen flex flex-col bg-gray-50">
       {/* Navbar */}
-      <nav className={`${darkMode ? 'bg-gray-950 border-gray-900' : 'bg-white border-gray-200'} border-b px-8 py-4 shrink-0`}>
+      <nav className="bg-white border-b px-6 py-4 shrink-0">
         <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Scrutiny</h1>
+            <div className="text-xs text-gray-500">Student dashboard</div>
+          </div>
+
           <div className="flex items-center gap-3">
-            <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`} style={{ fontFamily: '"Playfair Display", serif', fontOpticalSizing: 'auto' }}>Scrutiny</h1>
-          </div>    
-          <div className="flex items-center gap-4">
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              Dashboard
-            </button>
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              My Quizzes
-            </button>
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              Results
-            </button>
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              Schedule
-            </button>
-            <div className={`w-px h-6 ${darkMode ? 'bg-gray-600' : 'bg-gray-300'}`}></div>
-            <button 
-              onClick={toggleDarkMode}
-              className={`w-9 h-9 ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'} rounded-full flex items-center justify-center transition-colors`}
-              aria-label="Toggle dark mode"
+            <div className="text-sm text-gray-600">Signed in as: {auth.user?.email ?? "—"}</div>
+            <button
+              onClick={() => {
+                console.log("[StudentDashboard] Refresh clicked");
+                fetchQuizzes();
+              }}
+              className="px-3 py-1 border rounded text-sm"
             >
-              {darkMode ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-gray-700" />}
+              Refresh
             </button>
-            <button className={`w-9 h-9 ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'} rounded-full flex items-center justify-center transition-colors`}>
-              <span className={`text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>S</span>
+
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1 border rounded text-sm bg-red-50 hover:bg-red-100 text-red-700"
+            >
+              Logout
             </button>
           </div>
         </div>
       </nav>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto px-8 py-6">
-        {/* Stats Row */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          {stats.map((stat, index) => (
-            <div key={index} className={`${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} p-4 rounded-lg border h-32 flex flex-col justify-between`}>
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-1`}>{stat.label}</p>
-                  <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{stat.value}</p>
-                </div>
-                <div className={`w-11 h-11 ${darkMode ? 'bg-gray-800' : `bg-${stat.color}-100`} rounded-lg flex items-center justify-center`}>
-                  {stat.icon}
-                </div>
-              </div>
+      {/* Main */}
+      <main className="flex-1 overflow-auto p-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold">Available quizzes</h2>
+            <div className="text-sm text-gray-500">{loading ? "Loading..." : `${quizzes.length} quizzes`}</div>
+          </div>
+
+          {loading ? (
+            <div className="text-sm text-gray-600">Loading quizzes...</div>
+          ) : error ? (
+            <div className="text-sm text-red-600">Error: {error}</div>
+          ) : quizzes.length === 0 ? (
+            <div className="text-sm text-gray-600">No quizzes available right now.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {quizzes.map((q, i) => {
+                const id = q.id ?? q.quizId ?? q._id ?? `q-${i}`;
+                const status = (q.status ?? "available").toString();
+                return (
+                  <div key={String(id)} className="bg-white border rounded-lg p-4 shadow-sm flex flex-col">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-medium text-lg">{q.title ?? "Untitled quiz"}</div>
+                        <div className="text-xs text-gray-500">{q.subject ?? "No subject"}</div>
+                      </div>
+                      <div className="text-xs">
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            status.includes("avail") ? "bg-green-100 text-green-800 border border-green-200" : status.includes("in_progress") ? "bg-yellow-100 text-yellow-800 border border-yellow-200" : "bg-gray-100 text-gray-700 border border-gray-200"
+                          }`}
+                        >
+                          {status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 text-sm text-gray-600 flex-1">
+                      <div className="mb-1">Questions: {q.totalQuestions ?? "—"}</div>
+                      <div className="mb-1">Duration: {q.duration ? `${q.duration} min` : "—"}</div>
+                      <div className="mb-1">Due: {formatDate(q.dueDate)} ({getDaysRemaining(q.dueDate)})</div>
+                      <div>Attempts: {q.attempts ?? 0}/{q.maxAttempts ?? "∞"}</div>
+                    </div>
+
+                    <div className="mt-4 flex items-center gap-2">
+                      {/* Students cannot view details — keep Start disabled until you implement the quiz runner */}
+                      <button disabled className="bg-sky-600 text-white px-3 py-2 rounded opacity-80 cursor-not-allowed text-sm">
+                        Start
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          console.log("[StudentDashboard] Attempt clicked but not implemented", id);
+                          // optional: navigate to /quizzes/:id/take
+                        }}
+                        className="px-3 py-2 border rounded text-sm"
+                      >
+                        Details (disabled)
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
-        </div>
-
-        {/* Available Quizzes Section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Available Quizzes</h2>
-            <button className={`text-sm ${darkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'} font-medium transition-colors`}>
-              View All
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {availableQuizzes.map((quiz) => (
-              <div key={quiz.id} className={`${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} rounded-lg border p-5`}>
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <h3 className={`font-bold ${darkMode ? 'text-white' : 'text-gray-900'} mb-1`}>{quiz.title}</h3>
-                    <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{quiz.subject}</p>
-                  </div>
-                  {getStatusBadge(quiz.status)}
-                </div>
-
-                <div className={`${darkMode ? 'bg-gray-800' : 'bg-gray-50'} rounded-lg p-3 mb-4 space-y-2`}>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className={`flex items-center gap-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      <Clock className="w-4 h-4" strokeWidth={2} />
-                      Duration
-                    </span>
-                    <span className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{quiz.duration} min</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className={`flex items-center gap-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      <FileText className="w-4 h-4" strokeWidth={2} />
-                      Questions
-                    </span>
-                    <span className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{quiz.totalQuestions}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className={`flex items-center gap-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      <Calendar className="w-4 h-4" strokeWidth={2} />
-                      Due Date
-                    </span>
-                    <span className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{formatDate(quiz.dueDate)}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between mb-4">
-                  <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                    Attempts: {quiz.attempts}/{quiz.maxAttempts}
-                  </span>
-                  <span className={`text-xs font-medium ${getDaysRemaining(quiz.dueDate).includes('Overdue') || getDaysRemaining(quiz.dueDate).includes('today') ? 'text-red-600' : darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                    {getDaysRemaining(quiz.dueDate)}
-                  </span>
-                </div>
-
-                <button 
-                  className={`w-full py-2.5 px-4 ${quiz.status === 'in_progress' ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-blue-600 hover:bg-blue-700'} text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2`}
-                  disabled={(quiz.attempts ?? 0) >= quiz.maxAttempts && quiz.status !== 'in_progress'}
-                >
-                  <Play className="w-4 h-4" strokeWidth={2} />
-                  {quiz.status === 'in_progress' ? 'Resume Quiz' : 'Start Quiz'}
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Recent Results Section */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Recent Results</h2>
-            <button className={`text-sm ${darkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'} font-medium transition-colors`}>
-              View All
-            </button>
-          </div>
-          <div className={`${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} rounded-lg border`}>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'} border-b`}>
-                  <tr>
-                    <th className={`px-6 py-3 text-left text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wider`}>Quiz Title</th>
-                    <th className={`px-6 py-3 text-left text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wider`}>Subject</th>
-                    <th className={`px-6 py-3 text-left text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wider`}>Score</th>
-                    <th className={`px-6 py-3 text-left text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wider`}>Date</th>
-                    <th className={`px-6 py-3 text-left text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wider`}>Warnings</th>
-                    <th className={`px-6 py-3 text-left text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wider`}>Action</th>
-                  </tr>
-                </thead>
-                <tbody className={`${darkMode ? 'divide-gray-800' : 'divide-gray-200'} divide-y`}>
-                  {completedQuizzes.map((quiz) => (
-                    <tr key={quiz.id} className={`${darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-50'} transition-colors`}>
-                      <td className={`px-6 py-4 ${darkMode ? 'text-white' : 'text-gray-900'} font-medium`}>{quiz.title}</td>
-                      <td className={`px-6 py-4 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{quiz.subject}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-lg font-bold ${getScoreColor(quiz.score, quiz.totalQuestions)}`}>
-                            {quiz.score}/{quiz.totalQuestions}
-                          </span>
-                          <span className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                            ({Math.round((quiz.score / quiz.totalQuestions) * 100)}%)
-                          </span>
-                        </div>
-                      </td>
-                      <td className={`px-6 py-4 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{formatDate(quiz.completedAt)}</td>
-                      <td className="px-6 py-4">
-                        {quiz.warnings > 0 ? (
-                          <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full border border-red-200 flex items-center gap-1 w-fit">
-                            <AlertTriangle className="w-3 h-3" strokeWidth={2.5} />
-                            {quiz.warnings}
-                          </span>
-                        ) : (
-                          <span className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>None</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        <button className={`text-sm ${darkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'} font-medium transition-colors`}>
-                          View Details
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          )}
         </div>
       </main>
     </div>
   );
-};
-
-export default StudentDashboard;
+}

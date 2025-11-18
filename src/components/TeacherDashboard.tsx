@@ -1,426 +1,727 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Plus, 
-  BookOpen, 
-  FileText, 
-  Users, 
-  AlertTriangle, 
-  Video, 
-  CheckCircle, 
-  Play, 
-  Edit, 
-  Eye,
-  Moon,
-  Sun
-} from 'lucide-react';
+// src/components/TeacherDashboard.tsx
+import React, { useEffect, useState } from "react";
+import { useAuthContext } from "../auth/AuthProvider";
+import { supabase } from "../lib/supabaseClient";
+import { useNavigate } from "react-router-dom";
 
-interface Quiz {
-  id: string;
-  title: string;
-  duration: number;
-  totalQuestions: number;
-  createdAt: string;
-  status: 'draft' | 'active' | 'completed';
-  studentsAssigned: number;
-  submissions: number;
-}
+type Option = string;
+type Question = {
+  questionText: string;
+  options: Option[];
+  correctAnswer: number; // index
+};
 
-interface OngoingTest {
-  id: string;
-  quizTitle: string;
-  studentName: string;
-  startTime: string;
-  progress: number;
-  warnings: number;
-}
+type QuizMeta = {
+  id?: string;
+  title?: string;
+  subject?: string;
+  createdAt?: string;
+  teacherId?: string;
+  createdBy?: string;
+  [k: string]: any;
+};
 
-interface RecentActivity {
-  id: string;
-  type: 'submission' | 'warning' | 'quiz_created' | 'student_started';
-  message: string;
-  timestamp: string;
-}
+type QuizFull = {
+  id?: string;
+  title?: string;
+  subject?: string;
+  questions?: Array<{
+    questionText: string;
+    options: string[];
+    correctAnswer: number;
+  }>;
+  [k: string]: any;
+};
 
-export const TeacherDashboard = () => {
-  const [darkMode, setDarkMode] = useState(false);
+const emptyQuestion = (): Question => ({
+  questionText: "",
+  options: ["", ""],
+  correctAnswer: 0,
+});
 
+export const TeacherDashboard: React.FC = () => {
+  // Create quiz states
+  const [title, setTitle] = useState("");
+  const [subject, setSubject] = useState("");
+  const [questions, setQuestions] = useState<Question[]>([emptyQuestion()]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [successId, setSuccessId] = useState<string | null>(null);
+
+  // Quizzes list states
+  const [quizzes, setQuizzes] = useState<QuizMeta[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+
+  // Modal states for viewing a quiz
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [modalQuiz, setModalQuiz] = useState<QuizFull | null>(null);
+
+  const auth = useAuthContext();
+  const navigate = useNavigate();
+
+  const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
+  const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
+
+  // --- helpers for create quiz (kept as before, with debug logs) ---
+  const updateQuestion = (idx: number, patch: Partial<Question>) => {
+    console.log(`[TeacherDashboard] updateQuestion idx=${idx} patch=`, patch);
+    setQuestions((prev) => prev.map((q, i) => (i === idx ? { ...q, ...patch } : q)));
+  };
+
+  const setQuestionText = (idx: number, text: string) => {
+    console.log(`[TeacherDashboard] setQuestionText idx=${idx} text=`, text);
+    updateQuestion(idx, { questionText: text });
+  };
+
+  const addOption = (qIdx: number) => {
+    console.log(`[TeacherDashboard] addOption qIdx=${qIdx}`);
+    setQuestions((prev) =>
+      prev.map((q, i) =>
+        i === qIdx
+          ? {
+              ...q,
+              options: [...q.options, ""],
+            }
+          : q
+      )
+    );
+  };
+
+  const removeOption = (qIdx: number, optIdx: number) => {
+    console.log(`[TeacherDashboard] removeOption qIdx=${qIdx} optIdx=${optIdx}`);
+    setQuestions((prev) =>
+      prev.map((q, i) => {
+        if (i !== qIdx) return q;
+        const newOpts = q.options.filter((_, oi) => oi !== optIdx);
+        if (newOpts.length < 2) {
+          console.warn(`[TeacherDashboard] Attempted to remove option but minimum 2 options required (qIdx=${qIdx})`);
+          return q;
+        }
+        let newCorrect = q.correctAnswer;
+        if (optIdx < q.correctAnswer) newCorrect = q.correctAnswer - 1;
+        if (newCorrect >= newOpts.length) newCorrect = newOpts.length - 1;
+        return { ...q, options: newOpts, correctAnswer: newCorrect };
+      })
+    );
+  };
+
+  const setOptionText = (qIdx: number, optIdx: number, text: string) => {
+    console.log(`[TeacherDashboard] setOptionText qIdx=${qIdx} optIdx=${optIdx} text=`, text);
+    setQuestions((prev) =>
+      prev.map((q, i) =>
+        i === qIdx ? { ...q, options: q.options.map((o, oi) => (oi === optIdx ? text : o)) } : q
+      )
+    );
+  };
+
+  const setCorrectAnswer = (qIdx: number, index: number) => {
+    console.log(`[TeacherDashboard] setCorrectAnswer qIdx=${qIdx} index=${index}`);
+    setQuestions((prev) => prev.map((q, i) => (i === qIdx ? { ...q, correctAnswer: index } : q)));
+  };
+
+  const addQuestion = () => {
+    console.log("[TeacherDashboard] addQuestion");
+    setQuestions((prev) => [...prev, emptyQuestion()]);
+  };
+
+  const removeQuestion = (idx: number) => {
+    console.log(`[TeacherDashboard] removeQuestion idx=${idx}`);
+    setQuestions((prev) => prev.filter((_, i) => i !== idx) || [emptyQuestion()]);
+  };
+
+  const validate = (): { ok: boolean; error?: string } => {
+    console.log("[TeacherDashboard] validate called", { title, subject, questions });
+    if (!title.trim()) return { ok: false, error: "Title is required." };
+    if (!subject.trim()) return { ok: false, error: "Subject is required." };
+    if (!questions.length) return { ok: false, error: "Add at least one question." };
+
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      if (!q.questionText.trim()) return { ok: false, error: `Question ${i + 1} text is required.` };
+      if (!Array.isArray(q.options) || q.options.length < 2) return { ok: false, error: `Question ${i + 1} must have at least 2 options.` };
+      for (let j = 0; j < q.options.length; j++) {
+        if (!q.options[j].trim()) return { ok: false, error: `Question ${i + 1} option ${j + 1} cannot be empty.` };
+      }
+      if (q.correctAnswer == null || q.correctAnswer < 0 || q.correctAnswer >= q.options.length)
+        return { ok: false, error: `Question ${i + 1} has an invalid correct answer index.` };
+    }
+
+    return { ok: true };
+  };
+
+  // --- fetch list of quizzes and filter to this teacher (keeps previous behavior) ---
+  const fetchQuizzesForTeacher = async () => {
+    console.log("[TeacherDashboard] fetchQuizzesForTeacher start");
+    setListError(null);
+    setListLoading(true);
+
+    try {
+      const sessRes = await supabase.auth.getSession();
+      const session = sessRes?.data?.session ?? null;
+      const accessToken = session?.access_token ?? null;
+
+      console.log("[TeacherDashboard] token present:", Boolean(accessToken));
+
+      if (!accessToken) {
+        setListError("No access token available. Please sign in.");
+        setListLoading(false);
+        return;
+      }
+
+      const resp = await fetch(`${apiBase}/api/quizzes`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "ngrok-skip-browser-warning": "true",
+        },
+      });
+
+      console.log("[TeacherDashboard] GET /api/quizzes status:", resp.status);
+      const text = await resp.text();
+      console.log("[TeacherDashboard] GET /api/quizzes raw response:", text);
+
+      let json: any = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (parseErr) {
+        console.warn("[TeacherDashboard] could not parse quizzes response as JSON", parseErr);
+      }
+
+      if (!resp.ok) {
+        const errMsg = json?.message ?? text ?? `Status ${resp.status}`;
+        console.error("[TeacherDashboard] fetch quizzes failed:", errMsg);
+        setListError(errMsg);
+        setListLoading(false);
+        return;
+      }
+
+      const all: QuizMeta[] = Array.isArray(json) ? json : json?.quizzes ?? json?.data ?? [];
+      console.log("[TeacherDashboard] fetched quizzes count:", (all || []).length);
+
+      const userId = (auth.user as any)?.id ?? (auth.user as any)?.user?.id ?? null;
+      const userEmail = (auth.user as any)?.email ?? (auth.user as any)?.user?.email ?? null;
+      console.log("[TeacherDashboard] teacher identifiers:", { userId, userEmail });
+
+      const filtered = (all || []).filter((q) => {
+        if (!q) return false;
+        const ownerCandidates = [q.teacherId, q.createdBy, q.creatorId, q.ownerId, q.userId, q.instructorId, q.teacher_id, q.created_by, q.creator_id, q.owner_id];
+        for (const cand of ownerCandidates) {
+          if (!cand) continue;
+          if (String(cand) === String(userId) || String(cand) === String(userEmail)) return true;
+        }
+        if (q.email && String(q.email) === String(userEmail)) return true;
+        return false;
+      });
+
+      console.log("[TeacherDashboard] filtered quizzes count:", filtered.length);
+
+      setQuizzes(filtered);
+    } catch (err: any) {
+      console.error("[TeacherDashboard] fetchQuizzesForTeacher error:", err);
+      setListError(String(err?.message ?? err));
+    } finally {
+      setListLoading(false);
+      console.log("[TeacherDashboard] fetchQuizzesForTeacher finished");
+    }
+  };
+
+  // --- create quiz handler (kept, same as before) ---
+  const onCreate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setMsg(null);
+    setSuccessId(null);
+
+    console.log("[TeacherDashboard] onCreate started");
+
+    const v = validate();
+    if (!v.ok) {
+      console.warn("[TeacherDashboard] validation failed:", v.error);
+      setMsg(v.error ?? "Validation failed.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const sessRes = await supabase.auth.getSession();
+      const session = sessRes?.data?.session ?? null;
+      const accessToken = session?.access_token ?? null;
+
+      console.log("[TeacherDashboard] accessToken present:", Boolean(accessToken));
+
+      if (!accessToken) {
+        setMsg("No access token available. Please sign in again.");
+        setLoading(false);
+        return;
+      }
+
+      const payload = {
+        title: title.trim(),
+        subject: subject.trim(),
+        questions: questions.map((q) => ({
+          questionText: q.questionText.trim(),
+          options: q.options.map((o) => o.trim()),
+          correctAnswer: q.correctAnswer,
+        })),
+      };
+
+      console.log("[TeacherDashboard] payload:", payload);
+
+      const resp = await fetch(`${apiBase}/api/quizzes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      console.log("[TeacherDashboard] POST /api/quizzes status:", resp.status);
+
+      const text = await resp.text();
+      console.log("[TeacherDashboard] POST /api/quizzes raw response:", text);
+
+      let json: any = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+        console.log("[TeacherDashboard] parsed JSON response:", json);
+      } catch (parseErr) {
+        console.warn("[TeacherDashboard] response not JSON:", parseErr);
+      }
+
+      if (!resp.ok) {
+        const errMsg = json?.message ?? text ?? `Status ${resp.status}`;
+        console.error("[TeacherDashboard] create failed:", errMsg);
+        setMsg(`Create failed: ${errMsg}`);
+        setLoading(false);
+        return;
+      }
+
+      console.log("[TeacherDashboard] create success");
+      setMsg("Quiz created successfully.");
+      const createdId = json?.id ?? json?.quizId ?? json?.quiz?.id ?? null;
+      console.log("[TeacherDashboard] createdId:", createdId);
+      if (createdId) {
+        setSuccessId(String(createdId));
+      }
+
+      setTitle("");
+      setSubject("");
+      setQuestions([emptyQuestion()]);
+
+      // refresh list after creation
+      await fetchQuizzesForTeacher();
+    } catch (err: any) {
+      console.error("Create quiz error:", err);
+      setMsg("Network or server error: " + (err?.message ?? String(err)));
+    } finally {
+      setLoading(false);
+      console.log("[TeacherDashboard] onCreate finished");
+    }
+  };
+
+  // --- fetch single quiz details for modal ---
+  const fetchQuizDetails = async (id: string) => {
+    console.log("[TeacherDashboard] fetchQuizDetails start id=", id);
+    setModalError(null);
+    setModalLoading(true);
+    setModalQuiz(null);
+
+    try {
+      const sessRes = await supabase.auth.getSession();
+      const session = sessRes?.data?.session ?? null;
+      const accessToken = session?.access_token ?? null;
+
+      console.log("[TeacherDashboard] token present for modal:", Boolean(accessToken));
+      if (!accessToken) {
+        setModalError("No access token available. Please sign in.");
+        setModalLoading(false);
+        return;
+      }
+
+      const resp = await fetch(`${apiBase}/api/quizzes/${encodeURIComponent(id)}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "ngrok-skip-browser-warning": "true",
+        },
+      });
+
+      console.log("[TeacherDashboard] GET /api/quizzes/:id status:", resp.status);
+      const text = await resp.text();
+      console.log("[TeacherDashboard] GET /api/quizzes/:id raw response:", text);
+
+      let json: any = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+        console.log("[TeacherDashboard] parsed GET /api/quizzes/:id JSON:", json);
+      } catch (parseErr) {
+        console.warn("[TeacherDashboard] could not parse quiz detail response", parseErr);
+      }
+
+      if (!resp.ok) {
+        const errMsg = json?.message ?? text ?? `Status ${resp.status}`;
+        console.error("[TeacherDashboard] fetch quiz details failed:", errMsg);
+        setModalError(errMsg);
+        setModalLoading(false);
+        return;
+      }
+
+      // Backend may return quiz directly or { quiz: {...} }
+      const quiz: QuizFull = json?.quiz ?? json ?? null;
+      setModalQuiz(quiz);
+      console.log("[TeacherDashboard] modal quiz set:", quiz);
+    } catch (err: any) {
+      console.error("[TeacherDashboard] fetchQuizDetails error:", err);
+      setModalError(String(err?.message ?? err));
+    } finally {
+      setModalLoading(false);
+      console.log("[TeacherDashboard] fetchQuizDetails finished");
+    }
+  };
+
+  // open modal and start fetching
+  const openViewModal = async (id: string) => {
+    console.log("[TeacherDashboard] openViewModal id=", id);
+    setViewingId(id);
+    setModalOpen(true);
+    // fetch details
+    await fetchQuizDetails(id);
+  };
+
+  const closeModal = () => {
+    console.log("[TeacherDashboard] closeModal");
+    setModalOpen(false);
+    setViewingId(null);
+    setModalQuiz(null);
+    setModalError(null);
+    setModalLoading(false);
+  };
+
+  // Logout handler for teacher dashboard
+  const handleLogout = async () => {
+    console.log("[TeacherDashboard] logout requested");
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error("[TeacherDashboard] supabase signOut error:", error);
+      } else {
+        console.log("[TeacherDashboard] supabase signOut success");
+      }
+    } catch (err: any) {
+      console.error("[TeacherDashboard] signOut threw:", err);
+    } finally {
+      // Clear role in auth context (if available)
+      try {
+        auth.setRole(null);
+      } catch (e) {
+        console.warn("[TeacherDashboard] auth.setRole null failed:", e);
+      }
+      // Clear local UI state
+      setQuizzes([]);
+      setMsg(null);
+      setSuccessId(null);
+      // navigate to signin
+      navigate("/signin");
+    }
+  };
+
+  // load quizzes on mount
   useEffect(() => {
-    // Load dark mode preference from localStorage
-    const savedMode = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(savedMode);
+    fetchQuizzesForTeacher().catch((e) => console.error(e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    // Save dark mode preference to localStorage
-    localStorage.setItem('darkMode', darkMode.toString());
-  }, [darkMode]);
+  // UI: list item renderer
+  const QuizRow: React.FC<{ q: QuizMeta }> = ({ q }) => {
+    const id = q.id ?? q._id ?? q.quizId ?? q.id;
+    return (
+      <div className="border rounded p-3 flex items-center justify-between">
+        <div>
+          <div className="font-medium">{q.title ?? "Untitled"}</div>
+          <div className="text-xs text-gray-500">{q.subject ?? "No subject"} • id: {id}</div>
+        </div>
 
-  const toggleDarkMode = () => {
-    setDarkMode(!darkMode);
+        <div className="flex items-center gap-2">
+          <button
+            className="text-sm px-3 py-1 border rounded hover:bg-gray-100"
+            onClick={() => {
+              console.log("[TeacherDashboard] View quiz", id);
+              openViewModal(String(id));
+            }}
+          >
+            View
+          </button>
+          <button
+            className="text-sm px-3 py-1 border rounded text-red-600 hover:bg-red-50"
+            onClick={() => {
+              console.log("[TeacherDashboard] Delete requested for quiz", id);
+              alert("Delete not implemented yet.");
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    );
   };
 
-  // Mock data - replace with real API calls
-  const [quizzes] = useState<Quiz[]>([
-    {
-      id: '1',
-      title: 'Mathematics Mid-Term Exam',
-      duration: 60,
-      totalQuestions: 50,
-      createdAt: '2025-11-15',
-      status: 'active',
-      studentsAssigned: 35,
-      submissions: 28,
-    },
-    {
-      id: '2',
-      title: 'Physics Quiz - Chapter 5',
-      duration: 30,
-      totalQuestions: 25,
-      createdAt: '2025-11-14',
-      status: 'completed',
-      studentsAssigned: 32,
-      submissions: 32,
-    },
-    {
-      id: '3',
-      title: 'Chemistry Lab Assessment',
-      duration: 45,
-      totalQuestions: 30,
-      createdAt: '2025-11-17',
-      status: 'draft',
-      studentsAssigned: 0,
-      submissions: 0,
-    },
-  ]);
-
-  const [ongoingTests] = useState<OngoingTest[]>([
-    {
-      id: '1',
-      quizTitle: 'Mathematics Mid-Term Exam',
-      studentName: 'John Doe',
-      startTime: '10:30 AM',
-      progress: 65,
-      warnings: 0,
-    },
-    {
-      id: '2',
-      quizTitle: 'Mathematics Mid-Term Exam',
-      studentName: 'Jane Smith',
-      startTime: '10:32 AM',
-      progress: 58,
-      warnings: 2,
-    },
-    {
-      id: '3',
-      quizTitle: 'Mathematics Mid-Term Exam',
-      studentName: 'Mike Johnson',
-      startTime: '10:35 AM',
-      progress: 42,
-      warnings: 1,
-    },
-  ]);
-
-  const [recentActivities] = useState<RecentActivity[]>([
-    {
-      id: '1',
-      type: 'warning',
-      message: 'Jane Smith received warning #2 - Window switching attempt',
-      timestamp: '5 mins ago',
-    },
-    {
-      id: '2',
-      type: 'submission',
-      message: 'Sarah Williams submitted Mathematics Mid-Term Exam',
-      timestamp: '12 mins ago',
-    },
-    {
-      id: '3',
-      type: 'student_started',
-      message: 'Mike Johnson started Mathematics Mid-Term Exam',
-      timestamp: '18 mins ago',
-    },
-    {
-      id: '4',
-      type: 'warning',
-      message: 'Mike Johnson received warning #1 - Tab switching attempt',
-      timestamp: '22 mins ago',
-    },
-  ]);
-
-  const totalQuizzes = quizzes.length;
-  const activeQuizzes = quizzes.filter((q) => q.status === 'active').length;
-  const totalStudentsActive = ongoingTests.length;
-  const totalWarnings = ongoingTests.reduce((sum, test) => sum + test.warnings, 0);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'completed':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'draft':
-        return 'bg-gray-100 text-gray-800 border-gray-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+  // --- modal content renderer ---
+  const ModalContent = () => {
+    if (modalLoading) {
+      return <div className="p-6">Loading quiz...</div>;
     }
-  };
-
-  const getActivityIcon = (type: string) => {
-    switch (type) {
-      case 'warning':
-        return <AlertTriangle className="w-4 h-4 text-red-600" />;
-      case 'submission':
-        return <CheckCircle className="w-4 h-4 text-green-600" />;
-      case 'quiz_created':
-        return <FileText className="w-4 h-4 text-blue-600" />;
-      case 'student_started':
-        return <Play className="w-4 h-4 text-purple-600" />;
-      default:
-        return <div className="w-1 h-1 bg-gray-400 rounded-full" />;
+    if (modalError) {
+      return (
+        <div className="p-6">
+          <div className="text-red-600">Error: {modalError}</div>
+        </div>
+      );
     }
-  };
+    if (!modalQuiz) {
+      return <div className="p-6">No quiz data.</div>;
+    }
 
-  return (
-    <div className={`h-screen flex flex-col ${darkMode ? 'bg-black' : 'bg-gray-50'}`}>
-      {/* Navbar */}
-      <nav className={`${darkMode ? 'bg-gray-950 border-gray-900' : 'bg-white border-gray-200'} border-b px-8 py-4 shrink-0`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-        
-            <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`} style={{ fontFamily: '"Playfair Display", serif', fontOpticalSizing: 'auto' }}>Scrutiny</h1>
-          </div>    
-          <div className="flex items-center gap-4">
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              Dashboard
-            </button>
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              My Quizzes
-            </button>
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              Students
-            </button>
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              Reports
-            </button>
-            <div className={`w-px h-6 ${darkMode ? 'bg-gray-600' : 'bg-gray-300'}`}></div>
-            <button className={`px-4 py-2 ${darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'} font-medium transition-colors`}>
-              Recordings
-            </button>
-            <div className={`w-px h-6 ${darkMode ? 'bg-gray-600' : 'bg-gray-300'}`}></div>
-            <button 
-              onClick={toggleDarkMode}
-              className={`w-9 h-9 ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'} rounded-full flex items-center justify-center transition-colors`}
-              aria-label="Toggle dark mode"
-            >
-              {darkMode ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-gray-700" />}
-            </button>
-            <button className={`w-9 h-9 ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'} rounded-full flex items-center justify-center transition-colors`}>
-              <span className={`text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>T</span>
-            </button>
+    return (
+      <div className="p-6 space-y-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-xl font-semibold">{modalQuiz.title ?? "Untitled"}</h3>
+            <div className="text-sm text-gray-500">{modalQuiz.subject ?? "No subject"}</div>
           </div>
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto px-8 py-6">
-        {/* Top Row - Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          {/* Create Quiz Card */}
-          <button className={`${darkMode ? 'bg-gray-900 border-gray-800 hover:border-gray-700' : 'bg-white border-gray-200 hover:border-blue-400'} p-4 rounded-lg border-2 transition-all group text-center h-40 flex flex-col items-center justify-center`}>
-            <div className={`w-12 h-12 ${darkMode ? 'bg-gray-800 group-hover:bg-gray-700' : 'bg-blue-50 group-hover:bg-blue-100'} rounded-lg flex items-center justify-center mb-3 transition-colors`}>
-              <Plus className="w-6 h-6 text-blue-600" strokeWidth={2.5} />
-            </div>
-            <h3 className={`text-base font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Create Quiz</h3>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'} mt-1`}>Start a new assessment</p>
-          </button>
-
-          {/* Recent Quiz Card */}
-          <div className={`${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} p-4 rounded-lg border h-40 flex flex-col`}>
-            <div className="flex items-start justify-between mb-2">
-              <h3 className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-gray-900'} line-clamp-2`}>Midterm Quiz 01 </h3>
-              <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded border border-green-200 whitespace-nowrap ml-2">
-                Active
-              </span>
-            </div>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-auto`}>35 students • 28 submitted</p>
-            <div className="flex gap-2 mt-3">
-              <button className={`flex-1 px-2 py-1.5 text-xs ${darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'} font-medium rounded transition-colors`}>
-                View
-              </button>
-              <button className={`flex-1 px-2 py-1.5 text-xs ${darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-red-50 text-red-700 hover:bg-red-100'} font-medium rounded transition-colors`}>
-                End
-              </button>
-            </div>
-          </div>
-
-          {/* See All Quizzes Card */}
-          <button className={`${darkMode ? 'bg-gray-900 border-gray-800 hover:border-gray-700' : 'bg-white border-gray-200 hover:border-blue-400'} p-4 rounded-lg border-2 transition-all group text-center h-40 flex flex-col items-center justify-center`}>
-            <div className={`w-12 h-12 ${darkMode ? 'bg-gray-700 group-hover:bg-gray-600' : 'bg-gray-50 group-hover:bg-gray-100'} rounded-lg flex items-center justify-center mb-3 transition-colors`}>
-              <BookOpen className={`w-6 h-6 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`} strokeWidth={2} />
-            </div>
-            <h3 className={`text-base font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>See All Quizzes</h3>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'} mt-1`}>View & manage all</p>
-          </button>
+          <div className="text-xs text-gray-400">id: {modalQuiz.id}</div>
         </div>
 
-        {/* Second Row - Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          {/* Total Quizzes */}
-          <div className={`${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} p-4 rounded-lg border h-32 flex flex-col justify-between`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-1`}>Total Quizzes</p>
-                <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{totalQuizzes}</p>
-                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'} mt-1`}>{activeQuizzes} active now</p>
+        <div className="space-y-4">
+          {(modalQuiz.questions ?? []).map((q, i) => (
+            <div key={i} className="border rounded p-3 bg-gray-50">
+              <div className="font-medium mb-2">
+                {i + 1}. {q.questionText}
               </div>
-              <div className={`w-11 h-11 ${darkMode ? 'bg-gray-800' : 'bg-blue-100'} rounded-lg flex items-center justify-center`}>
-                <FileText className="w-5 h-5 text-blue-600" strokeWidth={2} />
-              </div>
-            </div>
-          </div>
-
-          {/* Students Testing */}
-          <div className={`${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} p-4 rounded-lg border h-32 flex flex-col justify-between`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-1`}>Students Testing</p>
-                <p className="text-2xl font-bold text-purple-600">{totalStudentsActive}</p>
-                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'} mt-1`}>Active sessions</p>
-              </div>
-              <div className={`w-11 h-11 ${darkMode ? 'bg-gray-800' : 'bg-purple-100'} rounded-lg flex items-center justify-center`}>
-                <Users className="w-5 h-5 text-purple-600" strokeWidth={2} />
-              </div>
-            </div>
-          </div>
-
-          {/* Active Warnings */}
-          <div className={`${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} p-4 rounded-lg border h-32 flex flex-col justify-between`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-1`}>Active Warnings</p>
-                <p className="text-2xl font-bold text-red-600">{totalWarnings}</p>
-                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'} mt-1`}>Requires attention</p>
-              </div>
-              <div className={`w-11 h-11 ${darkMode ? 'bg-gray-800' : 'bg-red-100'} rounded-lg flex items-center justify-center`}>
-                <AlertTriangle className="w-5 h-5 text-red-600" strokeWidth={2} />
-              </div>
-            </div>
-          </div>
-
-          {/* Video Recordings */}
-          <button className={`${darkMode ? 'bg-gray-900 border-gray-800 hover:border-gray-700' : 'bg-white border-gray-200 hover:border-blue-400'} p-4 rounded-lg border-2 h-32 flex flex-col justify-between transition-all group`}>
-            <div className="flex items-start justify-between">
-              <div className="text-left">
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-1`}>Video Recordings</p>
-                <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>12</p>
-                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'} mt-1`}>3 live streams</p>
-              </div>
-              <div className={`w-11 h-11 ${darkMode ? 'bg-gray-800 group-hover:bg-gray-700' : 'bg-orange-100 group-hover:bg-orange-200'} rounded-lg flex items-center justify-center transition-colors`}>
-                <Video className="w-5 h-5 text-orange-600" strokeWidth={2} />
-              </div>
-            </div>
-          </button>
-        </div>
-
-        {/* Bottom Row - Large Sections */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Ongoing Tests - Takes 2 columns */}
-          <div className={`lg:col-span-2 ${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} rounded-lg border`}>
-            <div className={`px-6 py-4 ${darkMode ? 'border-gray-800' : 'border-gray-200'} border-b`}>
-              <h2 className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Ongoing Tests</h2>
-              <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'} mt-1`}>Real-time monitoring of active exams</p>
-            </div>
-            <div className="p-6 max-h-[500px] overflow-auto">
-              {ongoingTests.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className={`w-16 h-16 ${darkMode ? 'bg-gray-700' : 'bg-gray-100'} rounded-full flex items-center justify-center mx-auto mb-4`}>
-                    <FileText className={`w-8 h-8 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`} strokeWidth={2} />
-                  </div>
-                  <p className={`${darkMode ? 'text-gray-400' : 'text-gray-500'} font-medium`}>No ongoing tests</p>
-                  <p className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-400'} mt-1`}>Tests will appear here when students start</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {ongoingTests.map((test) => (
+              <div className="space-y-2">
+                {q.options.map((opt, oi) => {
+                  const isCorrect = oi === q.correctAnswer;
+                  return (
                     <div
-                      key={test.id}
-                      className={`p-4 ${darkMode ? 'border-gray-700 hover:border-gray-600' : 'border-gray-200 hover:border-blue-300'} border rounded-lg hover:shadow-sm transition-all`}
+                      key={oi}
+                      className={`flex items-center gap-2 px-3 py-2 rounded ${isCorrect ? "bg-green-50 border border-green-200" : ""}`}
                     >
-                      <div className="flex items-start justify-between mb-3">
+                      <div className={`w-6 text-sm font-semibold ${isCorrect ? "text-green-700" : "text-gray-600"}`}>{String.fromCharCode(65 + oi)}.</div>
+                      <div className={`${isCorrect ? "text-green-700" : ""}`}>{opt}</div>
+                      {isCorrect && <div className="ml-auto text-xs text-green-700 font-medium">Correct</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Simple layout: left = create form, right = list + modal
+  return (
+    <>
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Create form (2/3 width on large screens) */}
+          <div className="lg:col-span-2 bg-white shadow rounded-lg p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-2xl font-semibold">Create Quiz</h1>
+              <div className="flex items-center gap-3">
+                <div className="text-sm text-gray-600">Signed in as: {auth.user?.email ?? "—"}</div>
+                <button
+                  onClick={handleLogout}
+                  className="px-3 py-1 border rounded text-sm bg-red-50 hover:bg-red-100 text-red-700"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={onCreate} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="block">
+                  <div className="text-sm font-medium text-gray-700 mb-1">Title</div>
+                  <input
+                    value={title}
+                    onChange={(e) => {
+                      setTitle(e.target.value);
+                      console.log("[TeacherDashboard] title changed:", e.target.value);
+                    }}
+                    className="w-full rounded border px-3 py-2"
+                    placeholder="E.g. Midterm Exam - Algebra"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="text-sm font-medium text-gray-700 mb-1">Subject</div>
+                  <input
+                    value={subject}
+                    onChange={(e) => {
+                      setSubject(e.target.value);
+                      console.log("[TeacherDashboard] subject changed:", e.target.value);
+                    }}
+                    className="w-full rounded border px-3 py-2"
+                    placeholder="E.g. Mathematics"
+                  />
+                </label>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-lg font-medium">Questions</h2>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={addQuestion} className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
+                      + Add question
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {questions.map((q, qi) => (
+                    <div key={qi} className="border rounded p-4 bg-gray-50">
+                      <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
-                          <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{test.studentName}</h3>
-                          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'} mt-0.5`}>{test.quizTitle}</p>
+                          <label className="block mb-2">
+                            <div className="text-sm font-medium text-gray-700">Question {qi + 1}</div>
+                            <input value={q.questionText} onChange={(e) => setQuestionText(qi, e.target.value)} className="w-full rounded border px-3 py-2" placeholder="Enter question text" />
+                          </label>
+
+                          <div className="space-y-2">
+                            {q.options.map((opt, oi) => (
+                              <div key={oi} className="flex items-center gap-2">
+                                <div className="flex items-center gap-2">
+                                  <input type="radio" name={`correct-${qi}`} checked={q.correctAnswer === oi} onChange={() => setCorrectAnswer(qi, oi)} />
+                                  <input value={opt} onChange={(e) => setOptionText(qi, oi, e.target.value)} className="rounded border px-2 py-1 w-full" placeholder={`Option ${oi + 1}`} />
+                                </div>
+
+                                <button type="button" onClick={() => removeOption(qi, oi)} className="text-sm text-red-600 hover:underline" title="Remove option">
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="mt-3 flex gap-2">
+                            <button type="button" onClick={() => addOption(qi)} className="text-sm px-3 py-1 border rounded hover:bg-gray-100">
+                              + Option
+                            </button>
+
+                            <button type="button" onClick={() => removeQuestion(qi)} className="text-sm px-3 py-1 border rounded text-red-600 hover:bg-red-50">
+                              Remove question
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {test.warnings > 0 && (
-                            <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full border border-red-200 flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3" strokeWidth={2.5} />
-                              {test.warnings}
-                            </span>
-                          )}
-                          <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'} font-medium`}>{test.startTime}</span>
+
+                        <div className="shrink-0 text-sm text-gray-500">
+                          <div className="mb-2">Preview</div>
+                          <div className="text-xs bg-white border rounded p-2 w-40">{q.questionText || "No question text"}</div>
                         </div>
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Progress</span>
-                          <span className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{test.progress}%</span>
-                        </div>
-                        <div className={`w-full ${darkMode ? 'bg-gray-700' : 'bg-gray-200'} rounded-full h-2.5`}>
-                          <div
-                            className={`h-2.5 rounded-full transition-all ${
-                              test.warnings > 0 ? 'bg-red-500' : darkMode ? 'bg-gray-500' : 'bg-blue-600'
-                            }`}
-                            style={{ width: `${test.progress}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        <button className={`px-3 py-1.5 text-xs ${darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'} font-medium rounded transition-colors`}>
-                          Monitor
-                        </button>
-                        <button className={`px-3 py-1.5 text-xs ${darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'} font-medium rounded transition-colors flex items-center gap-1`}>
-                          <Video className="w-3.5 h-3.5" strokeWidth={2} />
-                          Live
-                        </button>
-                        {test.warnings > 0 && (
-                          <button className={`px-3 py-1.5 text-xs ${darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-red-50 text-red-700 hover:bg-red-100'} font-medium rounded transition-colors`}>
-                            Warnings
-                          </button>
-                        )}
                       </div>
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button type="submit" disabled={loading} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+                  {loading ? "Creating..." : "Create Quiz"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log("[TeacherDashboard] Reset form");
+                    setTitle("");
+                    setSubject("");
+                    setQuestions([emptyQuestion()]);
+                    setMsg(null);
+                    setSuccessId(null);
+                  }}
+                  className="px-4 py-2 border rounded"
+                >
+                  Reset
+                </button>
+              </div>
+
+              {msg && <div className="text-sm text-red-600">{msg}</div>}
+              {successId && <div className="text-sm text-green-600">Created quiz id: {successId}</div>}
+            </form>
           </div>
 
-          {/* Test Activities - Takes 1 column */}
-          <div className={`lg:col-span-1 ${darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} rounded-lg border`}>
-            <div className={`px-6 py-4 ${darkMode ? 'border-gray-800' : 'border-gray-200'} border-b`}>
-              <h2 className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Test Activities</h2>
-              <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'} mt-1`}>Latest updates</p>
-            </div>
-            <div className="p-6 max-h-[500px] overflow-auto">
-              <div className="space-y-4">
-                {recentActivities.map((activity) => (
-                  <div key={activity.id} className="flex gap-3">
-                    <div className={`shrink-0 w-9 h-9 ${darkMode ? 'bg-gray-700' : 'bg-gray-100'} rounded-full flex items-center justify-center`}>
-                      {getActivityIcon(activity.type)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-900'} leading-snug`}>{activity.message}</p>
-                      <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'} mt-1`}>{activity.timestamp}</p>
-                    </div>
-                  </div>
-                ))}
+          {/* Right: Quizzes list (1/3 width on large screens) */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium">My Quizzes</h2>
+              <div>
+                <button
+                  onClick={() => {
+                    console.log("[TeacherDashboard] Refresh quizzes list clicked");
+                    fetchQuizzesForTeacher();
+                  }}
+                  className="text-sm px-2 py-1 border rounded"
+                >
+                  Refresh
+                </button>
               </div>
             </div>
+
+            {listLoading ? (
+              <div className="text-sm text-gray-600">Loading quizzes...</div>
+            ) : listError ? (
+              <div className="text-sm text-red-600">Error: {listError}</div>
+            ) : quizzes.length === 0 ? (
+              <div className="text-sm text-gray-600">No quizzes yet. Create one on the left.</div>
+            ) : (
+              <div className="space-y-3">
+                {quizzes.map((q) => (
+                  <QuizRow key={String(q.id ?? q._id ?? q.quizId ?? Math.random())} q={q} />
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      </main>
-    </div>
+      </div>
+
+      {/* Modal */}
+      {modalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            // click on backdrop closes
+            if (e.target === e.currentTarget) closeModal();
+          }}
+        >
+          <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
+          <div className="relative max-w-3xl w-full mx-4 bg-white rounded shadow-lg z-10 overflow-auto max-h-[80vh]">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div className="text-lg font-semibold">Quiz Details</div>
+              <div>
+                <button
+                  onClick={closeModal}
+                  className="px-3 py-1 rounded border text-sm hover:bg-gray-100"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div>{/* content */}<ModalContent /></div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
