@@ -287,7 +287,7 @@ export default function StudentDashboard(): React.ReactElement {
 
           {/* if activeQuiz present, show quiz view; otherwise show available list + optional lobby view */}
           {activeQuiz ? (
-            <StudentQuizView quiz={activeQuiz} />
+            <StudentQuizView quiz={activeQuiz} sessionId = {currentSessionId} />
           ) : (
             <>
               {/* Lobby view (if joined) */}
