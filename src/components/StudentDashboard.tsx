@@ -22,6 +22,10 @@ type QuizMeta = {
   createdBy?: string;
   teacherId?: string;
   email?: string;
+  // fields returned by history endpoint:
+  submissionId?: string;
+  score?: number;
+  submittedAt?: string;
   [k: string]: any;
 };
 
@@ -83,7 +87,8 @@ export default function StudentDashboard(): React.ReactElement {
         return;
       }
 
-      const resp = await fetch(`${apiBase}/api/quizzes`, {
+      // NOTE: history endpoint (returns past submissions for this student)
+      const resp = await fetch(`${apiBase}/api/quizzes/history`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -92,59 +97,33 @@ export default function StudentDashboard(): React.ReactElement {
         },
       });
 
-      console.log("[StudentDashboard] GET /api/quizzes status:", resp.status);
+      console.log("[StudentDashboard] GET /api/quizzes/history status:", resp.status);
       const text = await resp.text();
-      console.log("[StudentDashboard] GET /api/quizzes raw response:", text);
+      console.log("[StudentDashboard] GET /api/quizzes/history raw response:", text);
 
       let json: any = null;
       try {
         json = text ? JSON.parse(text) : null;
       } catch (parseErr) {
-        console.warn("[StudentDashboard] could not parse quizzes response as JSON", parseErr);
+        console.warn("[StudentDashboard] could not parse quizzes history response as JSON", parseErr);
       }
 
       if (!resp.ok) {
         const errMsg = json?.message ?? text ?? `Status ${resp.status}`;
-        console.error("[StudentDashboard] fetch quizzes failed:", errMsg);
+        console.error("[StudentDashboard] fetch quizzes history failed:", errMsg);
         setError(String(errMsg));
         setLoading(false);
         return;
       }
 
-      const all: QuizMeta[] = Array.isArray(json) ? json : json?.quizzes ?? json?.data ?? [];
-      console.log("[StudentDashboard] fetched quizzes count:", (all || []).length);
+      // The history endpoint returns an array of submissions
+      const all: QuizMeta[] = Array.isArray(json) ? json : json?.history ?? json?.data ?? [];
+      console.log("[StudentDashboard] fetched quizzes (history) count:", (all || []).length);
 
-      // Simple include logic: include public/available quizzes and not ones only created by the student
-      const userId = (auth.user as any)?.id ?? (auth.user as any)?.user?.id ?? null;
-      const filtered = (all || []).filter((q) => {
-        if (!q) return false;
-        const status = (q.status ?? "").toString().toLowerCase();
-        const assigned = q.assignedTo ?? q.allowedStudents ?? q.studentIds ?? q.students ?? null;
-
-        if (assigned) {
-          if (Array.isArray(assigned)) {
-            if (userId && assigned.map(String).includes(String(userId))) return true;
-          } else if (typeof assigned === "string") {
-            const parts = assigned.split?.(",").map((s: string) => s.trim()) ?? [assigned];
-            if (userId && parts.includes(String(userId))) return true;
-          }
-          // assigned exists but student not in it -> exclude
-          return false;
-        }
-
-        if (status === "available" || status === "active") return true;
-
-        const creator = q.creatorId ?? q.createdBy ?? q.creator_id ?? q.created_by ?? null;
-        if (creator && String(creator) !== String(userId)) return true;
-
-        const ownerCandidates = [q.teacherId, q.createdBy, q.creatorId, q.ownerId, q.userId, q.instructorId, q.teacher_id, q.created_by, q.creator_id, q.owner_id];
-        const hasOwnerInfo = ownerCandidates.some((c) => c !== undefined && c !== null);
-        if (!hasOwnerInfo) return true;
-
-        return false;
-      });
-
-      console.log("[StudentDashboard] filtered quizzes count:", filtered.length);
+      // We keep the same filter logic but for history we generally show everything returned.
+      // For robustness we still run a light filter to remove nulls.
+      const filtered = (all || []).filter(Boolean);
+      console.log("[StudentDashboard] filtered quizzes (history) count:", filtered.length);
       setQuizzes(filtered);
     } catch (err: any) {
       console.error("[StudentDashboard] fetchQuizzes error:", err);
@@ -268,9 +247,10 @@ export default function StudentDashboard(): React.ReactElement {
       {/* Main */}
       <main className="flex-1 overflow-auto p-6">
         <div className="max-w-6xl mx-auto">
+          {/* Title updated to reflect history */}
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold">Available quizzes</h2>
-            <div className="text-sm text-gray-500">{loading ? "Loading..." : `${quizzes.length} quizzes`}</div>
+            <h2 className="text-xl font-semibold">My Quiz History</h2>
+            <div className="text-sm text-gray-500">{loading ? "Loading..." : `${quizzes.length} records`}</div>
           </div>
 
           <div className="mb-6 flex gap-3">
@@ -285,9 +265,9 @@ export default function StudentDashboard(): React.ReactElement {
             )}
           </div>
 
-          {/* if activeQuiz present, show quiz view; otherwise show available list + optional lobby view */}
+          {/* if activeQuiz present, show quiz view; otherwise show history list + optional lobby view */}
           {activeQuiz ? (
-            <StudentQuizView quiz={activeQuiz} sessionId = {currentSessionId} />
+            <StudentQuizView quiz={activeQuiz} sessionId={currentSessionId} />
           ) : (
             <>
               {/* Lobby view (if joined) */}
@@ -303,52 +283,37 @@ export default function StudentDashboard(): React.ReactElement {
               )}
 
               {loading ? (
-                <div className="text-sm text-gray-600">Loading quizzes...</div>
+                <div className="text-sm text-gray-600">Loading history...</div>
               ) : error ? (
                 <div className="text-sm text-red-600">Error: {error}</div>
               ) : quizzes.length === 0 ? (
-                <div className="text-sm text-gray-600">No quizzes available right now.</div>
+                <div className="text-sm text-gray-600">No quiz history available yet.</div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                // Render history rows
+                <div className="space-y-4">
                   {quizzes.map((q, i) => {
-                    const id = q.id ?? q.quizId ?? q._id ?? `q-${i}`;
-                    const status = (q.status ?? "available").toString();
+                    const id = q.submissionId ?? q.quizId ?? q.id ?? `h-${i}`;
                     return (
-                      <div key={String(id)} className="bg-white border rounded-lg p-4 shadow-sm flex flex-col">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="font-medium text-lg">{q.title ?? "Untitled quiz"}</div>
-                            <div className="text-xs text-gray-500">{q.subject ?? "No subject"}</div>
+                      <div key={String(id)} className="bg-white border rounded-lg p-4 shadow-sm flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <div className="font-medium text-lg">{q.title ?? "Untitled quiz"}</div>
+                              <div className="text-xs text-gray-500">{q.subject ?? "No subject"}</div>
+                            </div>
+
+                            <div className="text-right">
+                              <div className="text-sm text-gray-500">Score</div>
+                              <div className="font-semibold text-lg">
+                                {typeof q.score === "number" ? `${q.score}` : (q.score ?? "—")}
+                                <span className="text-xs text-gray-500">/{q.totalQuestions ?? "—"}</span>
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-xs">
-                            <span
-                              className={`px-2 py-0.5 rounded text-xs font-medium ${status.includes("avail") ? "bg-green-100 text-green-800 border border-green-200" : status.includes("in_progress") ? "bg-yellow-100 text-yellow-800 border border-yellow-200" : "bg-gray-100 text-gray-700 border border-gray-200"}`}
-                            >
-                              {status}
-                            </span>
+
+                          <div className="mt-2 text-xs text-gray-500">
+                            Submitted: {q.submittedAt ? formatDate(q.submittedAt) : "—"}
                           </div>
-                        </div>
-
-                        <div className="mt-3 text-sm text-gray-600 flex-1">
-                          <div className="mb-1">Questions: {q.totalQuestions ?? "—"}</div>
-                          <div className="mb-1">Duration: {q.duration ? `${q.duration} min` : "—"}</div>
-                          <div className="mb-1">Due: {formatDate(q.dueDate)} ({getDaysRemaining(q.dueDate)})</div>
-                          <div>Attempts: {q.attempts ?? 0}/{q.maxAttempts ?? "∞"}</div>
-                        </div>
-
-                        <div className="mt-4 flex items-center gap-2">
-                          <button disabled className="bg-sky-600 text-white px-3 py-2 rounded opacity-80 cursor-not-allowed text-sm">
-                            Start
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              console.log("[StudentDashboard] Attempt clicked but not implemented", id);
-                            }}
-                            className="px-3 py-2 border rounded text-sm"
-                          >
-                            Details (disabled)
-                          </button>
                         </div>
                       </div>
                     );
