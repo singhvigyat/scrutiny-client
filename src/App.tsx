@@ -32,7 +32,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactEleme
   }
 
   if (!user) {
-    return <Navigate to="/signin" replace state={{ from: location }} />;
+    return <Navigate to="/" replace state={{ from: location }} />;
   }
 
   if (allowedRoles && allowedRoles.length > 0) {
@@ -67,8 +67,8 @@ function SmallDashboard() {
               const { supabase } = await import("./lib/supabaseClient");
               await supabase.auth.signOut();
               setRole(null); // clear persisted role & context
-              // navigate to signin explicitly to ensure UI updates
-              navigate("/signin");
+              // navigate to home explicitly to ensure UI updates
+              navigate("/");
             }}
             className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md"
           >
