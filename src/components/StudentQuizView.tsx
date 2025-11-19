@@ -21,9 +21,10 @@ type Props = {
   quiz: QuizFull;
   // optional explicit session id passed in by parent dashboard
   sessionId?: string | null;
+  onComplete?: () => void;
 };
 
-export default function StudentQuizView({ quiz, sessionId: propSessionId }: Props): React.ReactElement {
+export default function StudentQuizView({ quiz, sessionId: propSessionId, onComplete }: Props): React.ReactElement {
   const [answers, setAnswers] = useState<number[]>(
     (quiz.questions ?? []).map(() => -1)
   );
@@ -158,6 +159,13 @@ export default function StudentQuizView({ quiz, sessionId: propSessionId }: Prop
       console.log("[StudentQuizView] submit success:", json ?? text);
       setSubmitMsg("Submitted successfully.");
       setDisabled(true);
+      
+      // Notify parent to redirect/refresh
+      if (onComplete) {
+        setTimeout(() => {
+          onComplete();
+        }, 1500); // small delay to show success message
+      }
     } catch (err: any) {
       console.error("[StudentQuizView] submit error:", err);
       setSubmitError(String(err?.message ?? err));

@@ -438,7 +438,7 @@ export const TeacherDashboard: React.FC = () => {
       setQuizzes([]);
       setMsg(null);
       setSuccessId(null);
-      navigate("/");
+      // navigate("/");
     }
   };
 

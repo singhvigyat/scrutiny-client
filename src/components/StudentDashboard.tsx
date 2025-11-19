@@ -267,7 +267,15 @@ export default function StudentDashboard(): React.ReactElement {
 
           {/* if activeQuiz present, show quiz view; otherwise show history list + optional lobby view */}
           {activeQuiz ? (
-            <StudentQuizView quiz={activeQuiz} sessionId={currentSessionId} />
+            <StudentQuizView 
+              quiz={activeQuiz} 
+              sessionId={currentSessionId} 
+              onComplete={() => {
+                console.log("[StudentDashboard] Quiz completed, returning to dashboard");
+                setActiveQuiz(null);
+                fetchQuizzes();
+              }}
+            />
           ) : (
             <>
               {/* Lobby view (if joined) */}
