@@ -8,6 +8,9 @@ html, body, #root {
   font-optical-sizing: auto;
 }
 
-body {
-  overflow: auto;
+@layer base {
+  body {
+    overflow: auto;
+    @apply bg-gray-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 transition-colors duration-200;
+  }
 }

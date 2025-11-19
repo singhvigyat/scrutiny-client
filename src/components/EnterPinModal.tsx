@@ -1,6 +1,9 @@
 // src/components/EnterPinModal.tsx
 import React, { useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { Modal } from "./ui/Modal";
+import { Input } from "./ui/Input";
+import { Button } from "./ui/Button";
 
 interface EnterPinModalProps {
   open: boolean;
@@ -78,48 +81,45 @@ export default function EnterPinModal({ open, onClose, onJoined }: EnterPinModal
     }
   };
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center"
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <Modal
+      isOpen={open}
+      onClose={onClose}
+      title="Enter PIN"
+      maxWidth="sm"
     >
-      <div className="absolute inset-0 bg-black/50" />
-      <div className="relative w-full max-w-md bg-white rounded shadow p-6 z-10">
-        <h3 className="text-lg font-semibold mb-2">Enter PIN</h3>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Enter the PIN provided by your teacher to join the quiz session.
+        </p>
 
-        <div className="mb-3">
-          <label className="text-sm block mb-1">PIN</label>
-          <input
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            className="w-full border rounded px-3 py-2"
-            placeholder="e.g. 961971"
-            autoFocus
-          />
-        </div>
+        <Input
+          label="PIN Code"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          placeholder="e.g. 961971"
+          autoFocus
+        />
 
-        <div className="flex gap-2 items-center">
-          <button
-            onClick={joinWithPin}
-            disabled={loading}
-            className="bg-blue-600 text-white px-3 py-2 rounded disabled:opacity-60"
-          >
-            {loading ? "Joining..." : "Join"}
-          </button>
+        {msg && (
+          <div className={`text-sm p-2 rounded ${
+            msg.includes("Joined") 
+              ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400" 
+              : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+          }`}>
+            {msg}
+          </div>
+        )}
 
-          <button onClick={onClose} className="px-3 py-2 border rounded">
+        <div className="flex justify-end gap-3 pt-2">
+          <Button variant="ghost" onClick={onClose}>
             Cancel
-          </button>
+          </Button>
+          <Button onClick={joinWithPin} loading={loading}>
+            Join Session
+          </Button>
         </div>
-
-        {msg && <div className="mt-3 text-sm text-gray-700">{msg}</div>}
       </div>
-    </div>
+    </Modal>
   );
 }

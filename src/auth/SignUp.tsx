@@ -1,6 +1,9 @@
 // src/auth/SignUp.tsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
+import { AlertCircle, UserPlus } from 'lucide-react';
 
 type Role = 'student' | 'teacher';
 
@@ -62,9 +65,6 @@ export default function SignUp({ onAfterSignUp }: SignUpProps) {
     setLoading(true);
 
     try {
-      // Build payload exactly as requested:
-      // student -> { email, password, name, role, mis }
-      // teacher -> { email, password, name, role, employee_id }
       const payload: Record<string, unknown> = {
         email: email,
         password: password,
@@ -99,15 +99,11 @@ export default function SignUp({ onAfterSignUp }: SignUpProps) {
       const json = await resp.json();
       setMessage(json?.message ?? 'Account created. Check email for verification if enabled.');
 
-      // clear sensitive fields
       clear();
 
-      // notify parent (switch to sign in view, etc.)
       if (onAfterSignUp) {
         onAfterSignUp();
       } else {
-        // if parent didn't provide a handler (e.g. dedicated /signup route),
-        // navigate to the sign-in page.
         navigate('/signin');
       }
     } catch (err: any) {
@@ -118,129 +114,105 @@ export default function SignUp({ onAfterSignUp }: SignUpProps) {
   }
 
   return (
-    <form onSubmit={handleSignUp} className="space-y-4" noValidate>
-      <h2 className="text-2xl font-semibold text-slate-700">Create an account</h2>
-
-      <div>
-        <label className="block text-sm">
-          <span className="text-gray-600 mb-1 block">Name</span>
-          <input
-            className="mt-1 block w-full rounded-md border-slate-200 p-2"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            autoComplete="name"
-            placeholder="Full name"
-          />
-        </label>
+    <div className="w-full max-w-md mx-auto">
+      <div className="mb-8 text-center">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Create Account</h2>
+        <p className="text-slate-500 dark:text-slate-400 mt-2">Join Scrutiny to start your journey</p>
       </div>
 
-      <div>
-        <label className="block text-sm">
-          <span className="text-gray-600 mb-1 block">Email</span>
-          <input
-            type="email"
-            className="mt-1 block w-full rounded-md border-slate-200 p-2"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-            placeholder="you@example.com"
-          />
-        </label>
-      </div>
+      <form onSubmit={handleSignUp} className="space-y-4">
+        <Input
+          label="Full Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="John Doe"
+          required
+          autoComplete="name"
+        />
 
-      <div>
-        <label className="block text-sm">
-          <span className="text-gray-600 mb-1 block">Password</span>
-          <input
-            type="password"
-            className="mt-1 block w-full rounded-md border-slate-200 p-2"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-            autoComplete="new-password"
-            placeholder="Choose a strong password"
-          />
-        </label>
-      </div>
+        <Input
+          label="Email Address"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          required
+          autoComplete="email"
+        />
 
-      <div>
-        <label className="block text-sm">
-          <span className="text-gray-600 mb-1 block">Role</span>
-          <div className="flex gap-4">
-            <label className={`inline-flex items-center gap-2 ${role === 'student' ? 'text-sky-600' : 'text-slate-600'}`}>
-              <input
-                type="radio"
-                name="role"
-                value="student"
-                checked={role === 'student'}
-                onChange={() => setRole('student')}
-              />
-              <span className="text-sm">Student</span>
-            </label>
+        <Input
+          label="Password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Min. 6 characters"
+          required
+          autoComplete="new-password"
+        />
 
-            <label className={`inline-flex items-center gap-2 ${role === 'teacher' ? 'text-sky-600' : 'text-slate-600'}`}>
-              <input
-                type="radio"
-                name="role"
-                value="teacher"
-                checked={role === 'teacher'}
-                onChange={() => setRole('teacher')}
-              />
-              <span className="text-sm">Teacher</span>
-            </label>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Role</label>
+          <div className="grid grid-cols-2 gap-4">
+            <button
+              type="button"
+              onClick={() => setRole('student')}
+              className={`flex items-center justify-center px-4 py-2 border rounded-lg text-sm font-medium transition-all ${
+                role === 'student'
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-500'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              Student
+            </button>
+            <button
+              type="button"
+              onClick={() => setRole('teacher')}
+              className={`flex items-center justify-center px-4 py-2 border rounded-lg text-sm font-medium transition-all ${
+                role === 'teacher'
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-500'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              Teacher
+            </button>
           </div>
-        </label>
-      </div>
-
-      {role === 'student' ? (
-        <div>
-          <label className="block text-sm">
-            <span className="text-gray-600 mb-1 block">MIS</span>
-            <input
-              value={mis}
-              onChange={(e) => setMis(e.target.value)}
-              className="mt-1 block w-full rounded-md border-slate-200 p-2"
-              placeholder="e.g. 112233144"
-              autoComplete="off"
-            />
-          </label>
         </div>
-      ) : (
-        <div>
-          <label className="block text-sm">
-            <span className="text-gray-600 mb-1 block">Employee ID</span>
-            <input
-              value={employee_id}
-              onChange={(e) => setEmployeeId(e.target.value)}
-              className="mt-1 block w-full rounded-md border-slate-200 p-2"
-              placeholder="e.g. EMP-4567"
-              autoComplete="off"
-            />
-          </label>
-        </div>
-      )}
 
-      <div className="flex items-center justify-between">
-        <button
-          type="submit"
-          disabled={loading}
-          className="bg-white border border-slate-200 px-4 py-2 rounded-md shadow-sm hover:bg-slate-50 disabled:opacity-60"
-        >
-          {loading ? 'Creating...' : 'Create account'}
-        </button>
+        {role === 'student' ? (
+          <Input
+            label="MIS Number"
+            value={mis}
+            onChange={(e) => setMis(e.target.value)}
+            placeholder="e.g. 112233144"
+            required
+            autoComplete="off"
+          />
+        ) : (
+          <Input
+            label="Employee ID"
+            value={employee_id}
+            onChange={(e) => setEmployeeId(e.target.value)}
+            placeholder="e.g. EMP-4567"
+            required
+            autoComplete="off"
+          />
+        )}
 
-        <div className="text-sm text-slate-500">
-          Already have an account?{' '}
-          <button type="button" className="text-sky-600" onClick={() => { if (onAfterSignUp) onAfterSignUp(); else navigate('/signin'); }}>
-            Sign in
-          </button>
-        </div>
-      </div>
+        {message && (
+          <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
+            message.includes('failed') || message.includes('error')
+              ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400'
+          }`}>
+            <AlertCircle className="w-4 h-4" />
+            {message}
+          </div>
+        )}
 
-      {message && <div className="text-sm text-slate-600">{message}</div>}
-    </form>
+        <Button type="submit" loading={loading} className="w-full" icon={<UserPlus className="w-4 h-4" />}>
+          Create Account
+        </Button>
+      </form>
+    </div>
   );
 }

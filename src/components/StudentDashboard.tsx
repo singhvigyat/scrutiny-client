@@ -2,6 +2,11 @@
 import React, { useEffect, useState } from "react";
 import { useAuthContext } from "../auth/AuthProvider";
 import { supabase } from "../lib/supabaseClient";
+import { LogOut, RefreshCw, Key, Clock, CheckCircle, AlertCircle } from "lucide-react";
+
+import { Button } from "./ui/Button";
+import { Card } from "./ui/Card";
+import { ThemeToggle } from "./ThemeToggle";
 import EnterPinModal from "./EnterPinModal";
 import LobbyView from "./LobbyView";
 import StudentQuizView from "./StudentQuizView";
@@ -39,19 +44,6 @@ const formatDate = (dateString?: string) => {
   }
 };
 
-const getDaysRemaining = (dueDate?: string) => {
-  if (!dueDate) return "No due date";
-  const today = new Date();
-  const due = new Date(dueDate);
-  const diffTime = due.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-  if (diffDays < 0) return "Overdue";
-  if (diffDays === 0) return "Due today";
-  if (diffDays === 1) return "Due tomorrow";
-  return `${diffDays} days left`;
-};
-
 export default function StudentDashboard(): React.ReactElement {
   const auth = useAuthContext();
   const [quizzes, setQuizzes] = useState<QuizMeta[]>([]);
@@ -65,7 +57,6 @@ export default function StudentDashboard(): React.ReactElement {
   const [joinedQuizId, setJoinedQuizId] = useState<string | null>(null);
 
   // Track submitted sessions/quizzes to prevent re-opening via poll
-  // We store strings like "s:123" for sessions and "q:456" for quizzes to be safe
   const submittedRef = React.useRef<Set<string>>(new Set());
 
   // Load from local storage on mount
@@ -106,7 +97,6 @@ export default function StudentDashboard(): React.ReactElement {
       const session = sessRes?.data?.session ?? null;
       const accessToken = session?.access_token ?? null;
 
-      console.log("[StudentDashboard] token present:", Boolean(accessToken));
       if (!accessToken) {
         setError("No access token available. Please sign in.");
         setLoading(false);
@@ -123,10 +113,7 @@ export default function StudentDashboard(): React.ReactElement {
         },
       });
 
-      console.log("[StudentDashboard] GET /api/quizzes/history status:", resp.status);
       const text = await resp.text();
-      console.log("[StudentDashboard] GET /api/quizzes/history raw response:", text);
-
       let json: any = null;
       try {
         json = text ? JSON.parse(text) : null;
@@ -136,27 +123,19 @@ export default function StudentDashboard(): React.ReactElement {
 
       if (!resp.ok) {
         const errMsg = json?.message ?? text ?? `Status ${resp.status}`;
-        console.error("[StudentDashboard] fetch quizzes history failed:", errMsg);
         setError(String(errMsg));
         setLoading(false);
         return;
       }
 
-      // The history endpoint returns an array of submissions
       const all: QuizMeta[] = Array.isArray(json) ? json : json?.history ?? json?.data ?? [];
-      console.log("[StudentDashboard] fetched quizzes (history) count:", (all || []).length);
-
-      // We keep the same filter logic but for history we generally show everything returned.
-      // For robustness we still run a light filter to remove nulls.
       const filtered = (all || []).filter(Boolean);
-      console.log("[StudentDashboard] filtered quizzes (history) count:", filtered.length);
       setQuizzes(filtered);
     } catch (err: any) {
       console.error("[StudentDashboard] fetchQuizzes error:", err);
       setError(String(err?.message ?? err));
     } finally {
       setLoading(false);
-      console.log("[StudentDashboard] fetchQuizzes finished");
     }
   };
 
@@ -170,7 +149,6 @@ export default function StudentDashboard(): React.ReactElement {
     console.log("[StudentDashboard] onPinJoined sessionId=", sessionId, "quizId=", quizId);
     setCurrentSessionId(String(sessionId));
     if (quizId) setJoinedQuizId(String(quizId));
-    // leave EnterPinModal open state to parent UI decides; here we just store ids
     setPinModalOpen(false);
   };
 
@@ -178,7 +156,6 @@ export default function StudentDashboard(): React.ReactElement {
   const handleSessionStarted = async (sessionNormalized: any) => {
     console.log("[StudentDashboard] onSessionStarted", sessionNormalized);
 
-    // prefer quizId from the join response (joinedQuizId) — that is authoritative for this student
     const quizIdToUse = joinedQuizId ?? sessionNormalized?.quizId ?? sessionNormalized?.session?.quizId ?? null;
     const sId = sessionNormalized?.id ?? sessionNormalized?.sessionId;
 
@@ -199,18 +176,14 @@ export default function StudentDashboard(): React.ReactElement {
     }
 
     if (!quizIdToUse) {
-      console.warn("[StudentDashboard] No quizId available from join or session; cannot fetch quiz yet.", { sessionNormalized, joinedQuizId });
       setError("Quiz details not available yet — please wait for teacher.");
       return;
     }
-
-    console.log("[StudentDashboard] Using quizId to fetch quiz:", quizIdToUse);
 
     try {
       const sessRes = await supabase.auth.getSession();
       const accessToken = sessRes?.data?.session?.access_token ?? null;
       if (!accessToken) {
-        console.warn("[StudentDashboard] no access token when trying to fetch quiz");
         setError("No auth token available.");
         return;
       }
@@ -229,16 +202,14 @@ export default function StudentDashboard(): React.ReactElement {
       try {
         json = text ? JSON.parse(text) : null;
       } catch {
-        console.warn("[StudentDashboard] quiz GET returned non-JSON:", text.slice(0, 200));
+        // ignore
       }
 
       if (!resp.ok) {
-        console.error("[StudentDashboard] failed to fetch quiz:", resp.status, text);
         setError("Failed to load quiz details. Please contact your teacher.");
         return;
       }
 
-      console.log("[StudentDashboard] fetched quiz details:", json);
       setActiveQuiz(json);
     } catch (err: any) {
       console.error("[StudentDashboard] error fetching quiz:", err);
@@ -246,69 +217,46 @@ export default function StudentDashboard(): React.ReactElement {
     }
   };
 
-  // handle session updates (optional) — e.g. show lobby info
   const handleSessionUpdate = (normalized: any) => {
     console.log("[StudentDashboard] lobby update:", normalized);
-    // could update UI about participants, time left, etc.
   };
 
   const logout = async () => {
-    const { supabase: sb } = { supabase }; // to keep linter happy
-    await sb.auth.signOut();
-    // optionally redirect; parent router may detect no-auth and show sign-in
+    await supabase.auth.signOut();
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 transition-colors duration-200 flex flex-col">
       {/* Navbar */}
-      <nav className="bg-white border-b px-6 py-4 shrink-0">
-        <div className="flex items-center justify-between">
+      <nav className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-6 py-4 sticky top-0 z-10 shrink-0">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Scrutiny</h1>
-            <div className="text-xs text-gray-500">Student dashboard</div>
+            <h1 className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">Scrutiny</h1>
+            <div className="text-xs text-slate-500 dark:text-slate-400">Student Dashboard</div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="text-sm text-gray-600">Signed in as: {auth.user?.email ?? "—"}</div>
-            <button
-              onClick={() => {
-                console.log("[StudentDashboard] Refresh clicked");
-                fetchQuizzes();
-              }}
-              className="px-3 py-1 border rounded text-sm"
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-slate-600 dark:text-slate-300 hidden md:block">
+              {auth.user?.email ?? "—"}
+            </div>
+            <ThemeToggle />
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={logout}
+              icon={<LogOut className="w-4 h-4" />}
             >
-              Refresh
-            </button>
-
-            <button onClick={logout} className="px-3 py-1 border rounded text-sm bg-red-50 text-red-700 hover:bg-red-100">
               Logout
-            </button>
+            </Button>
           </div>
         </div>
       </nav>
 
       {/* Main */}
       <main className="flex-1 overflow-auto p-6">
-        <div className="max-w-6xl mx-auto">
-          {/* Title updated to reflect history */}
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold">My Quiz History</h2>
-            <div className="text-sm text-gray-500">{loading ? "Loading..." : `${quizzes.length} records`}</div>
-          </div>
-
-          <div className="mb-6 flex gap-3">
-            <button onClick={() => setPinModalOpen(true)} className="px-3 py-2 bg-sky-600 text-white rounded">
-              Enter PIN to Join Lobby
-            </button>
-
-            {currentSessionId && (
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                In lobby: <strong>{currentSessionId}</strong>
-              </div>
-            )}
-          </div>
-
-          {/* if activeQuiz present, show quiz view; otherwise show history list + optional lobby view */}
+        <div className="max-w-5xl mx-auto space-y-8">
+          
+          {/* Active Quiz View */}
           {activeQuiz ? (
             <StudentQuizView 
               quiz={activeQuiz} 
@@ -322,52 +270,109 @@ export default function StudentDashboard(): React.ReactElement {
             />
           ) : (
             <>
-              {/* Lobby view (if joined) */}
+              {/* Lobby View (if joined) */}
               {currentSessionId && (
-                <div className="mb-6">
+                <Card className="mb-8 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-indigo-900 dark:text-indigo-300 flex items-center gap-2">
+                      <Clock className="w-5 h-5" />
+                      Waiting Room
+                    </h3>
+                    <span className="text-sm font-mono bg-white dark:bg-slate-900 px-2 py-1 rounded border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400">
+                      Session: {currentSessionId}
+                    </span>
+                  </div>
                   <LobbyView
                     sessionId={currentSessionId}
                     role="student"
                     onSessionStarted={handleSessionStarted}
                     onSessionUpdate={handleSessionUpdate}
                   />
+                </Card>
+              )}
+
+              {/* Actions & History Header */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">My Quiz History</h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    {loading ? "Loading records..." : `${quizzes.length} past submissions`}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Button 
+                    variant="primary" 
+                    onClick={() => setPinModalOpen(true)}
+                    icon={<Key className="w-4 h-4" />}
+                  >
+                    Enter PIN to Join
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => fetchQuizzes()}
+                    icon={<RefreshCw className="w-4 h-4" />}
+                  >
+                    Refresh
+                  </Button>
+                </div>
+              </div>
+
+              {/* Error Message */}
+              {error && (
+                <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5" />
+                  {error}
                 </div>
               )}
 
-              {loading ? (
-                <div className="text-sm text-gray-600">Loading history...</div>
-              ) : error ? (
-                <div className="text-sm text-red-600">Error: {error}</div>
-              ) : quizzes.length === 0 ? (
-                <div className="text-sm text-gray-600">No quiz history available yet.</div>
+              {/* History List */}
+              {!loading && quizzes.length === 0 && !error ? (
+                <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 mb-4">
+                    <Clock className="w-6 h-6 text-slate-400" />
+                  </div>
+                  <h3 className="text-lg font-medium text-slate-900 dark:text-white">No history yet</h3>
+                  <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-1">
+                    You haven't taken any quizzes yet. Join a session with a PIN to get started.
+                  </p>
+                </div>
               ) : (
-                // Render history rows
-                <div className="space-y-4">
+                <div className="grid gap-4">
                   {quizzes.map((q, i) => {
                     const id = q.submissionId ?? q.quizId ?? q.id ?? `h-${i}`;
                     return (
-                      <div key={String(id)} className="bg-white border rounded-lg p-4 shadow-sm flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between gap-4">
-                            <div>
-                              <div className="font-medium text-lg">{q.title ?? "Untitled quiz"}</div>
-                              <div className="text-xs text-gray-500">{q.subject ?? "No subject"}</div>
-                            </div>
+                      <Card key={String(id)} className="hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <h3 className="font-semibold text-lg text-slate-900 dark:text-white">
+                                  {q.title ?? "Untitled Quiz"}
+                                </h3>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                  {q.subject ?? "No subject"}
+                                </p>
+                              </div>
 
-                            <div className="text-right">
-                              <div className="text-sm text-gray-500">Score</div>
-                              <div className="font-semibold text-lg">
-                                {typeof q.score === "number" ? `${q.score}` : (q.score ?? "—")}
-                                <span className="text-xs text-gray-500">/{q.totalQuestions ?? "—"}</span>
+                              <div className="text-right">
+                                <div className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider font-medium">Score</div>
+                                <div className="font-bold text-2xl text-indigo-600 dark:text-indigo-400">
+                                  {typeof q.score === "number" ? `${q.score}` : (q.score ?? "—")}
+                                  <span className="text-sm text-slate-400 font-normal ml-1">
+                                    / {q.totalQuestions ?? "—"}
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          <div className="mt-2 text-xs text-gray-500">
-                            Submitted: {q.submittedAt ? formatDate(q.submittedAt) : "—"}
+                            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                              <CheckCircle className="w-3 h-3 text-green-500" />
+                              Submitted on {q.submittedAt ? formatDate(q.submittedAt) : "—"}
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      </Card>
                     );
                   })}
                 </div>

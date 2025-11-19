@@ -3,6 +3,10 @@ import React, { useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuthContext } from "./AuthProvider";
+import { Button } from "../components/ui/Button";
+import { Input } from "../components/ui/Input";
+import { Card } from "../components/ui/Card";
+import { LogIn, AlertCircle } from "lucide-react";
 
 type LocationState = {
   from?: { pathname: string };
@@ -27,11 +31,9 @@ export const SignIn: React.FC = () => {
     setMsg(null);
 
     console.log("🔵 [SignIn] Starting sign-in...");
-    console.log("🔵 Email:", email);
 
     try {
       // 1) Sign in with Supabase to obtain a session/access token
-      console.log("🟠 [Supabase] Calling signInWithPassword...");
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -44,19 +46,12 @@ export const SignIn: React.FC = () => {
         return;
       }
 
-      console.log("🟢 [Supabase] Login success:", data);
-
       const session = (data as any)?.session ?? null;
       const accessToken = session?.access_token ?? null;
-
-      console.log("🟣 [Supabase] Access Token:", accessToken?.slice(0, 20), "...");
 
       // 2) Call your backend /api/auth/me with the access token.
       const apiBase = getApiBase();
       const meUrl = `${apiBase}/api/auth/me`;
-
-      console.log("🟠 [Backend] Calling:", meUrl);
-      console.log("🟠 Authorization header:", `Bearer ${accessToken?.slice(0, 12)}...`);
 
       try {
         const resp = await fetch(meUrl, {
@@ -68,11 +63,7 @@ export const SignIn: React.FC = () => {
           },
         });
 
-        console.log("🟠 [Backend] Status:", resp.status);
-
         const text = await resp.text();
-        console.log("🟠 [Backend] Raw Response:", text);
-
         let json: any = null;
         try {
           json = text ? JSON.parse(text) : null;
@@ -82,22 +73,18 @@ export const SignIn: React.FC = () => {
         }
 
         if (!resp.ok) {
-          console.error("🔴 [Backend] Error Response:", json);
           const errMsg = json?.message ?? `Status ${resp.status}`;
           setMsg(`Server error: ${errMsg}`);
         }
 
         const role: string | undefined = json?.user?.role;
-        console.log("🟢 [Backend] Extracted role:", role);
 
         // Set the role in AuthProvider synchronously BEFORE navigation to avoid races.
         auth.setRole(role ?? null);
-        console.log("🟢 [SignIn] auth.setRole called with:", role ?? null);
 
         // If there was an original intended route, go there first
         const intended = locState?.from?.pathname;
         if (intended) {
-          console.log("🟢 Redirecting to intended route:", intended);
           navigate(intended);
           setLoading(false);
           return;
@@ -105,13 +92,10 @@ export const SignIn: React.FC = () => {
 
         // Navigate based on role from server response
         if (role === "student") {
-          console.log("🟢 Redirecting to /student");
           navigate("/student");
         } else if (role === "teacher") {
-          console.log("🟢 Redirecting to /teacher");
           navigate("/teacher");
         } else {
-          console.warn("⚠️ No role found. Redirecting to /dashboard");
           navigate("/dashboard");
         }
       } catch (backendErr: any) {
@@ -122,10 +106,8 @@ export const SignIn: React.FC = () => {
         // fallback navigation even if backend failed
         const intended = locState?.from?.pathname;
         if (intended) {
-          console.log("🟢 Redirecting to intended route (fallback):", intended);
           navigate(intended);
         } else {
-          console.log("🟢 Redirecting to /dashboard (fallback)");
           navigate("/dashboard");
         }
       }
@@ -133,31 +115,48 @@ export const SignIn: React.FC = () => {
       console.error("🔴 [SignIn] Unexpected error:", err);
       setMsg(err?.message ?? String(err));
     } finally {
-      console.log("🟢 [SignIn] Sign-in finished.");
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={onSignIn} style={{ maxWidth: 420 }}>
-      <h2>Sign in</h2>
-
-      <div>
-        <label>Email</label>
-        <input value={email} onChange={(e) => setEmail(e.target.value)} required />
+    <div className="w-full max-w-md mx-auto">
+      <div className="mb-8 text-center">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Welcome Back</h2>
+        <p className="text-slate-500 dark:text-slate-400 mt-2">Sign in to access your dashboard</p>
       </div>
 
-      <div>
-        <label>Password</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      </div>
+      <form onSubmit={onSignIn} className="space-y-6">
+        <Input
+          label="Email Address"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          required
+        />
 
-      <button type="submit" disabled={loading}>
-        {loading ? "Signing in..." : "Sign in"}
-      </button>
+        <Input
+          label="Password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="••••••••"
+          required
+        />
 
-      {msg && <p>{msg}</p>}
-    </form>
+        {msg && (
+          <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" />
+            {msg}
+          </div>
+        )}
+
+        <Button type="submit" loading={loading} className="w-full" icon={<LogIn className="w-4 h-4" />}>
+          Sign In
+        </Button>
+      </form>
+    </div>
   );
 };
 

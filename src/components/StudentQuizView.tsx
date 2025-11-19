@@ -1,136 +1,63 @@
 // src/components/StudentQuizView.tsx
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { Button } from "./ui/Button";
+import { Card } from "./ui/Card";
+import { CheckCircle, AlertTriangle, Send } from "lucide-react";
 
-type QuizFull = {
-  id?: string;
-  title?: string;
-  subject?: string;
-  questions?: Array<{
-    questionText?: string;
-    options?: string[];
-    [k: string]: any;
-  }>;
-  sessionId?: string;
-  session?: { id?: string; [k: string]: any };
-  quizSessionId?: string;
-  [k: string]: any;
-};
-
-type Props = {
-  quiz: QuizFull;
-  // optional explicit session id passed in by parent dashboard
+interface Props {
+  quiz: any;
   sessionId?: string | null;
-  onComplete?: (quizId?: string) => void;
-};
+  onComplete?: (quizId: string) => void;
+}
 
-export default function StudentQuizView({ quiz, sessionId: propSessionId, onComplete }: Props): React.ReactElement {
-  const [answers, setAnswers] = useState<number[]>(
-    (quiz.questions ?? []).map(() => -1)
-  );
+export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) {
+  // answers: map of questionIndex -> optionIndex
+  const [answers, setAnswers] = useState<Record<number, number>>({});
   const [submitting, setSubmitting] = useState(false);
-  const [submitMsg, setSubmitMsg] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [disabled, setDisabled] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const findSessionId = (): string | null => {
-    // 1) explicit prop from parent (highest priority)
-    if (propSessionId) {
-      console.log("[StudentQuizView] using sessionId passed as prop:", propSessionId);
-      return String(propSessionId);
-    }
+  const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
+  const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
 
-    // 2) storage keys
-    try {
-      const candidates = [
-        (window as any).sessionStorage?.getItem?.("currentSessionId"),
-        (window as any).localStorage?.getItem?.("currentSessionId"),
-        (window as any).sessionStorage?.getItem?.("sessionId"),
-        (window as any).localStorage?.getItem?.("sessionId"),
-      ];
-      for (const c of candidates) {
-        if (c) {
-          console.log("[StudentQuizView] found sessionId from storage:", c);
-          return String(c);
-        }
-      }
-    } catch (e) {
-      console.warn("[StudentQuizView] storage access error while looking for sessionId", e);
-    }
-
-    // 3) properties on quiz object
-    const quizCandidates = [
-      quiz.sessionId,
-      quiz.quizSessionId,
-      quiz.session?.id,
-      quiz.session?.sessionId,
-    ];
-    for (const cand of quizCandidates) {
-      if (cand) {
-        console.log("[StudentQuizView] found sessionId on quiz object:", cand);
-        return String(cand);
-      }
-    }
-
-    console.warn("[StudentQuizView] no sessionId found via prop/storage/quiz object");
-    return null;
+  const handleOptionSelect = (qIndex: number, optIndex: number) => {
+    setAnswers((prev) => ({ ...prev, [qIndex]: optIndex }));
   };
 
-  useEffect(() => {
-    setAnswers((prev) => {
-      const qlen = (quiz.questions ?? []).length;
-      if (prev.length === qlen) return prev;
-      const next = Array.from({ length: qlen }).map((_, i) => prev[i] ?? -1);
-      return next;
-    });
-  }, [quiz.questions]);
-
-  const handleSelect = (qIdx: number, optIdx: number) => {
-    if (disabled) return;
-    setAnswers((prev) => {
-      const copy = prev.slice();
-      copy[qIdx] = optIdx;
-      return copy;
-    });
-  };
-
-  const handleSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    setSubmitMsg(null);
-    setSubmitError(null);
-
-    const qCount = (quiz.questions ?? []).length;
-    if (qCount === 0) {
-      setSubmitError("No questions in this quiz.");
-      return;
-    }
-
-    const sessionId = findSessionId();
+  const handleSubmit = async () => {
     if (!sessionId) {
-      setSubmitError("Session ID not found. Please join the lobby using the PIN before the quiz starts.");
+      setError("Missing session ID. Cannot submit.");
       return;
+    }
+
+    // Validate all questions answered?
+    const totalQ = quiz.questions?.length || 0;
+    if (Object.keys(answers).length < totalQ) {
+      if (!confirm("You haven't answered all questions. Submit anyway?")) {
+        return;
+      }
     }
 
     setSubmitting(true);
+    setError(null);
+
     try {
       const sessRes = await supabase.auth.getSession();
       const accessToken = sessRes?.data?.session?.access_token ?? null;
-
       if (!accessToken) {
-        setSubmitError("No authentication token. Please sign in again.");
+        setError("No access token. Please sign in again.");
         setSubmitting(false);
         return;
       }
 
-      const payload = { answers: answers.map((a) => (a == null ? null : Number(a))) };
+      const payload = {
+        answers: Object.entries(answers).map(([qIdx, optIdx]) => ({
+          questionIndex: Number(qIdx),
+          selectedOption: optIdx,
+        })),
+      };
 
-      const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
-      const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
-      const url = `${apiBase}/api/sessions/${encodeURIComponent(sessionId)}/submit`;
-
-      console.log("[StudentQuizView] submitting answers to", url, "payload:", payload);
-
-      const resp = await fetch(url, {
+      const resp = await fetch(`${apiBase}/api/sessions/${encodeURIComponent(sessionId)}/submit`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -145,99 +72,111 @@ export default function StudentQuizView({ quiz, sessionId: propSessionId, onComp
       try {
         json = text ? JSON.parse(text) : null;
       } catch {
-        json = null;
+        // ignore
       }
 
       if (!resp.ok) {
-        const errMsg = (json && json.message) || text || `Status ${resp.status}`;
-        console.error("[StudentQuizView] submit failed:", errMsg);
-        setSubmitError(typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg));
+        const errMsg = json?.message ?? text ?? `Status ${resp.status}`;
+        setError(`Submission failed: ${errMsg}`);
         setSubmitting(false);
         return;
       }
 
-      console.log("[StudentQuizView] submit success:", json ?? text);
-      setSubmitMsg("Submitted successfully.");
-      setDisabled(true);
+      console.log("Submission successful:", json);
+      alert(`Quiz submitted! Your score: ${json.score ?? "?"}/${json.totalQuestions ?? "?"}`);
       
-      // Notify parent to redirect/refresh
-      if (onComplete) {
-        setTimeout(() => {
-          onComplete(quiz.id);
-        }, 1500); // small delay to show success message
+      // Notify parent to clear quiz view
+      if (onComplete && quiz.id) {
+        onComplete(String(quiz.id));
       }
     } catch (err: any) {
-      console.error("[StudentQuizView] submit error:", err);
-      setSubmitError(String(err?.message ?? err));
-    } finally {
+      console.error("Submit error:", err);
+      setError("Network error: " + err.message);
       setSubmitting(false);
     }
   };
 
+  if (!quiz) return <div className="p-6 text-center text-slate-500">Loading quiz...</div>;
+
+  const questions = quiz.questions || [];
+
   return (
-    <div className="bg-white border rounded-lg p-6 shadow-sm max-w-4xl mx-auto">
-      <div className="mb-4">
-        <div className="text-xs text-gray-500">Live Quiz</div>
-        <h1 className="text-2xl font-semibold">{quiz.title ?? "Untitled Quiz"}</h1>
-        {quiz.subject && <div className="text-sm text-gray-600">{quiz.subject}</div>}
+    <div className="max-w-3xl mx-auto space-y-6 pb-12">
+      <Card className="border-l-4 border-l-indigo-500">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{quiz.title}</h2>
+            <p className="text-slate-500 dark:text-slate-400">{quiz.subject}</p>
+          </div>
+          <div className="text-right text-sm text-slate-500 dark:text-slate-400">
+            <div>{questions.length} Questions</div>
+            {sessionId && <div className="font-mono text-xs mt-1">Session: {sessionId}</div>}
+          </div>
+        </div>
+      </Card>
+
+      <div className="space-y-6">
+        {questions.map((q: any, i: number) => (
+          <Card key={i} className="relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-slate-200 dark:bg-slate-700">
+              {answers[i] !== undefined && (
+                <div className="absolute top-0 left-0 w-full h-full bg-green-500"></div>
+              )}
+            </div>
+            
+            <div className="pl-4">
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-4">
+                <span className="text-slate-400 mr-2">{i + 1}.</span>
+                {q.questionText}
+              </h3>
+
+              <div className="space-y-3">
+                {q.options?.map((opt: string, optIdx: number) => {
+                  const isSelected = answers[i] === optIdx;
+                  return (
+                    <label
+                      key={optIdx}
+                      className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all ${
+                        isSelected
+                          ? "bg-indigo-50 border-indigo-500 dark:bg-indigo-900/20 dark:border-indigo-500 ring-1 ring-indigo-500"
+                          : "bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name={`q-${i}`}
+                        className="w-4 h-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                        checked={isSelected}
+                        onChange={() => handleOptionSelect(i, optIdx)}
+                      />
+                      <span className={`ml-3 ${isSelected ? "text-indigo-900 dark:text-indigo-100 font-medium" : "text-slate-700 dark:text-slate-300"}`}>
+                        {opt}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </Card>
+        ))}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {(quiz.questions ?? []).map((q, qi) => (
-          <div key={qi} className="border rounded p-4 bg-gray-50">
-            <div className="font-medium mb-2">
-              {qi + 1}. {q.questionText}
-            </div>
-
-            <div className="space-y-2">
-              {q.options?.map((opt, oi) => {
-                const checked = answers[qi] === oi;
-                return (
-                  <label key={oi} className={`flex items-center gap-3 p-2 rounded hover:bg-white ${checked ? "bg-white border" : ""}`}>
-                    <input
-                      type="radio"
-                      name={`q-${qi}`}
-                      checked={checked}
-                      onChange={() => handleSelect(qi, oi)}
-                      disabled={disabled}
-                    />
-                    <div className="flex-1 text-sm">{opt}</div>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-
-        {submitError && <div className="text-sm text-red-600">{submitError}</div>}
-        {submitMsg && <div className="text-sm text-green-600">{submitMsg}</div>}
-        {answers.length > 0 && answers.some((a) => a < 0) && !disabled && (
-          <div className="text-xs text-yellow-700">Warning: some questions are unanswered. Submission will record unanswered items as null.</div>
-        )}
-
-        <div className="flex items-center gap-3">
-          <button type="submit" disabled={submitting || disabled} className="bg-green-600 text-white px-4 py-2 rounded">
-            {submitting ? "Submitting..." : disabled ? "Submitted" : "Submit answers"}
-          </button>
-
-          <button
-            type="button"
-            disabled={submitting}
-            onClick={() => {
-              if (disabled) return;
-              setAnswers((quiz.questions ?? []).map(() => -1));
-              setSubmitMsg(null);
-              setSubmitError(null);
-            }}
-            className="px-4 py-2 border rounded"
-          >
-            Clear answers
-          </button>
+      {error && (
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg flex items-center gap-2">
+          <AlertTriangle className="w-5 h-5" />
+          {error}
         </div>
-      </form>
+      )}
 
-      <div className="mt-4 text-xs text-gray-500">
-        <div>Debug: sessionId detection attempted — check console for detected session id.</div>
+      <div className="flex justify-end pt-6 border-t border-slate-200 dark:border-slate-700">
+        <Button
+          size="lg"
+          onClick={handleSubmit}
+          loading={submitting}
+          icon={<Send className="w-5 h-5" />}
+        >
+          Submit Quiz
+        </Button>
       </div>
     </div>
   );

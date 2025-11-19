@@ -2,13 +2,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useSessionPoll } from "../hooks/useSessionPoll";
 import { supabase } from "../lib/supabaseClient";
+import { Button } from "./ui/Button";
+import { Card } from "./ui/Card";
+import { Users, Play, Square, Clock, Hash, Info } from "lucide-react";
 
 interface Props {
   sessionId: string;
   role: "teacher" | "student";
   onClose?: () => void;
   onSessionStarted?: (session: any) => void;
-  onSessionUpdate?: (session: any) => void; // NEW: optional callback for interim session updates
+  onSessionUpdate?: (session: any) => void;
 }
 
 type RawSession = any;
@@ -75,11 +78,9 @@ export default function LobbyView({
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // derive apiBase as other components do
   const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
   const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
 
-  // Notify parent about any session updates coming from poll (normalized)
   useEffect(() => {
     if (!session) return;
     const normalized = normalizeSession(session);
@@ -92,7 +93,6 @@ export default function LobbyView({
     }
   }, [session, onSessionUpdate]);
 
-  // If the session becomes active, fetch canonical session details (try status endpoint first)
   useEffect(() => {
     if (!session) return;
     const sStatus = (session.status ?? session.state ?? "").toString().toLowerCase();
@@ -111,7 +111,6 @@ export default function LobbyView({
             return;
           }
 
-          // Try the new /status endpoint first
           const statusUrl = `${apiBase}/api/sessions/${encodeURIComponent(sessionId)}/status`;
           console.log("[LobbyView] fetching full session details from (status endpoint):", statusUrl);
 
@@ -139,7 +138,6 @@ export default function LobbyView({
               throw new Error(`status endpoint returned ${resp.status}`);
             }
 
-            // On success, prefer json.session or json
             const full = json?.session ?? json ?? session;
             const normalized = normalizeSession(full);
             console.log("[LobbyView] fetched session via /status (normalized):", normalized);
@@ -147,10 +145,8 @@ export default function LobbyView({
             return;
           } catch (err) {
             console.warn("[LobbyView] status endpoint failed or missing, falling back. err:", err);
-            // fallthrough to canonical fallbacks below
           }
 
-          // fallback: try canonical session endpoints (same pattern as useSessionPoll)
           const fallbacks = [
             `${apiBase}/api/sessions/${encodeURIComponent(sessionId)}`,
             `${apiBase}/api/session/${encodeURIComponent(sessionId)}`,
@@ -192,7 +188,6 @@ export default function LobbyView({
             }
           }
 
-          // nothing succeeded — pass normalized poll session
           const normalized = normalizeSession(session);
           console.warn("[LobbyView] could not fetch canonical session details, passing normalized poll session:", normalized);
           onSessionStarted?.(normalized);
@@ -245,7 +240,6 @@ export default function LobbyView({
         return;
       }
 
-      // update local session; polling will catch up too
       setSession(json ?? session);
       console.log("[LobbyView] started session:", json);
     } catch (err: any) {
@@ -304,59 +298,100 @@ export default function LobbyView({
   };
 
   return (
-    <div className="bg-white border rounded p-4 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <div className="text-sm text-gray-600">Session</div>
-          <div className="text-lg font-semibold">{session?.id ?? sessionId}</div>
-          <div className="text-xs text-gray-500">{session?.pin ? `PIN: ${session.pin}` : ""}</div>
+    <Card className="max-w-3xl mx-auto">
+      <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 dark:border-slate-700">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <Hash className="w-4 h-4" />
+            Session ID
+          </div>
+          <div className="text-2xl font-bold text-slate-900 dark:text-white font-mono">{session?.id ?? sessionId}</div>
+          {session?.pin && (
+            <div className="inline-flex items-center gap-1 px-2 py-1 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-medium">
+              PIN: {session.pin}
+            </div>
+          )}
         </div>
 
-        <div className="text-right">
-          <div className="text-sm">Status</div>
-          <div className="font-medium">{session?.status ?? "unknown"}</div>
-          <div className="text-xs text-gray-500">{session?.startsAt ? `Starts: ${new Date(session.startsAt).toLocaleString()}` : ""}</div>
-        </div>
-      </div>
-
-      {error && <div className="text-sm text-red-600">{error}</div>}
-      {actionError && <div className="text-sm text-red-600">{actionError}</div>}
-
-      <div className="mb-3">
-        <div className="text-sm font-medium mb-2">Participants ({participants.length})</div>
-        <div className="space-y-2">
-          {participants.length === 0 ? (
-            <div className="text-sm text-gray-500">No participants yet</div>
-          ) : (
-            participants.map((p: any, i: any) => (
-              <div key={p.id ?? i} className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">{p.name ?? p.email ?? p.id}</div>
-                  <div className="text-xs text-gray-500">{p.email ?? ""}</div>
-                </div>
-                <div className="text-xs text-gray-500">{p.id}</div>
-              </div>
-            ))
+        <div className="text-right space-y-1">
+          <div className="flex items-center justify-end gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <Info className="w-4 h-4" />
+            Status
+          </div>
+          <div className={`font-medium px-3 py-1 rounded-full inline-block text-sm ${
+            session?.status === "active" 
+              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
+              : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+          }`}>
+            {session?.status ?? "unknown"}
+          </div>
+          {session?.startsAt && (
+            <div className="flex items-center justify-end gap-1 text-xs text-slate-400">
+              <Clock className="w-3 h-3" />
+              {new Date(session.startsAt).toLocaleTimeString()}
+            </div>
           )}
         </div>
       </div>
 
-      <div className="flex gap-2">
+      {error && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded text-sm">{error}</div>}
+      {actionError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded text-sm">{actionError}</div>}
+
+      <div className="mb-6">
+        <div className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-white mb-3">
+          <Users className="w-4 h-4" />
+          Participants ({participants.length})
+        </div>
+        
+        <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700 p-4 min-h-[100px] max-h-[300px] overflow-y-auto">
+          {participants.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 text-sm py-4">
+              <Users className="w-8 h-8 mb-2 opacity-20" />
+              Waiting for students to join...
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {participants.map((p: any, i: any) => (
+                <div key={p.id ?? i} className="flex items-center justify-between bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700 shadow-sm">
+                  <div className="truncate">
+                    <div className="font-medium text-sm text-slate-900 dark:text-white truncate">{p.name ?? p.email ?? p.id}</div>
+                    {p.email && <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{p.email}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
         {role === "teacher" && (
           <>
-            <button onClick={startSession} disabled={actionLoading || session?.status === "active"} className="px-3 py-1 bg-green-600 text-white rounded">
-              {actionLoading ? "Working..." : session?.status === "active" ? "Active" : "Start"}
-            </button>
-            <button onClick={endSession} disabled={actionLoading || session?.status !== "active"} className="px-3 py-1 border rounded">
-              End
-            </button>
+            <Button 
+              onClick={startSession} 
+              disabled={actionLoading || session?.status === "active"} 
+              variant="primary"
+              loading={actionLoading}
+              icon={<Play className="w-4 h-4" />}
+            >
+              {session?.status === "active" ? "Session Active" : "Start Session"}
+            </Button>
+            
+            <Button 
+              onClick={endSession} 
+              disabled={actionLoading || session?.status !== "active"} 
+              variant="danger"
+              icon={<Square className="w-4 h-4" />}
+            >
+              End Session
+            </Button>
           </>
         )}
 
-        <button onClick={() => onClose?.()} className="px-3 py-1 border rounded">
+        <Button onClick={() => onClose?.()} variant="outline">
           Close Lobby
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
