@@ -64,6 +64,32 @@ export default function StudentDashboard(): React.ReactElement {
   // IMPORTANT: quizId returned by join — authoritative for this student
   const [joinedQuizId, setJoinedQuizId] = useState<string | null>(null);
 
+  // Track submitted sessions/quizzes to prevent re-opening via poll
+  // We store strings like "s:123" for sessions and "q:456" for quizzes to be safe
+  const submittedRef = React.useRef<Set<string>>(new Set());
+
+  // Load from local storage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("submittedItems");
+      if (saved) {
+        submittedRef.current = new Set(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.warn("Failed to load submitted items", e);
+    }
+  }, []);
+
+  const markSubmitted = (sId?: string | null, qId?: string | null) => {
+    if (sId) submittedRef.current.add(`s:${sId}`);
+    if (qId) submittedRef.current.add(`q:${qId}`);
+    try {
+      localStorage.setItem("submittedItems", JSON.stringify(Array.from(submittedRef.current)));
+    } catch (e) {
+      console.warn("Failed to save submitted items", e);
+    }
+  };
+
   // When session becomes active we will fetch quiz into this
   const [activeQuiz, setActiveQuiz] = useState<any | null>(null);
 
@@ -154,6 +180,23 @@ export default function StudentDashboard(): React.ReactElement {
 
     // prefer quizId from the join response (joinedQuizId) — that is authoritative for this student
     const quizIdToUse = joinedQuizId ?? sessionNormalized?.quizId ?? sessionNormalized?.session?.quizId ?? null;
+    const sId = sessionNormalized?.id ?? sessionNormalized?.sessionId;
+
+    // Check if we should ignore this start event
+    if (sId) {
+      const key = `s:${sId}`;
+      if (submittedRef.current.has(key)) {
+        console.log("[StudentDashboard] Ignoring session start for already submitted session:", key);
+        return;
+      }
+    }
+    if (quizIdToUse) {
+      const key = `q:${quizIdToUse}`;
+      if (submittedRef.current.has(key)) {
+        console.log("[StudentDashboard] Ignoring session start for already submitted quiz:", key);
+        return;
+      }
+    }
 
     if (!quizIdToUse) {
       console.warn("[StudentDashboard] No quizId available from join or session; cannot fetch quiz yet.", { sessionNormalized, joinedQuizId });
@@ -270,8 +313,9 @@ export default function StudentDashboard(): React.ReactElement {
             <StudentQuizView 
               quiz={activeQuiz} 
               sessionId={currentSessionId} 
-              onComplete={() => {
-                console.log("[StudentDashboard] Quiz completed, returning to dashboard");
+              onComplete={(completedQuizId) => {
+                console.log("[StudentDashboard] Quiz completed, returning to dashboard. qId:", completedQuizId);
+                markSubmitted(currentSessionId, completedQuizId);
                 setActiveQuiz(null);
                 fetchQuizzes();
               }}

@@ -21,7 +21,7 @@ type Props = {
   quiz: QuizFull;
   // optional explicit session id passed in by parent dashboard
   sessionId?: string | null;
-  onComplete?: () => void;
+  onComplete?: (quizId?: string) => void;
 };
 
 export default function StudentQuizView({ quiz, sessionId: propSessionId, onComplete }: Props): React.ReactElement {
@@ -163,7 +163,7 @@ export default function StudentQuizView({ quiz, sessionId: propSessionId, onComp
       // Notify parent to redirect/refresh
       if (onComplete) {
         setTimeout(() => {
-          onComplete();
+          onComplete(quiz.id);
         }, 1500); // small delay to show success message
       }
     } catch (err: any) {
