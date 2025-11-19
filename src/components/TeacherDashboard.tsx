@@ -481,8 +481,38 @@ export const TeacherDashboard: React.FC = () => {
         return;
       }
 
-      setResultsData(json);
+      console.log("[TeacherDashboard] results response:", json);
+
+      // Normalize data: if array, wrap it
+      let normalized = json;
+      if (Array.isArray(json)) {
+        normalized = {
+          submissions: json,
+          totalSubmissions: json.length,
+          averageScore: 0, // will be calculated in render
+          passRate: 0
+        };
+      } else if (json && json.results && Array.isArray(json.results)) {
+        // Handle { results: [...] } case (Backend format)
+        normalized = {
+          submissions: json.results,
+          totalSubmissions: json.totalSubmissions ?? json.results.length,
+          averageScore: json.averageScore,
+          passRate: json.passRate
+        };
+      } else if (json && !json.submissions && json.data) {
+        // Handle { data: [...] } case
+        normalized = {
+          submissions: json.data,
+          totalSubmissions: json.total ?? json.data.length,
+          averageScore: json.averageScore,
+          passRate: json.passRate
+        };
+      }
+
+      setResultsData(normalized);
     } catch (err: any) {
+      console.error("[TeacherDashboard] fetchResults error:", err);
       setResultsError(String(err?.message ?? err));
     } finally {
       setResultsLoading(false);
@@ -506,14 +536,14 @@ export const TeacherDashboard: React.FC = () => {
   const QuizRow: React.FC<{ q: QuizMeta }> = ({ q }) => {
     const id = q.id ?? q._id ?? q.quizId ?? q.id;
     return (
-      <Card className="mb-3 hover:shadow-md transition-shadow">
-        <div className="flex items-center justify-between">
+      <Card className="hover:shadow-md transition-shadow border-l-4 border-l-indigo-500 dark:border-l-indigo-400">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="font-semibold text-lg text-slate-900 dark:text-white">{q.title ?? "Untitled"}</div>
-            <div className="text-sm text-slate-500 dark:text-slate-400">{q.subject ?? "No subject"}</div>
+            <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">{q.subject ?? "No subject"}</div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3 flex-wrap">
             <Button
               size="sm"
               variant="outline"
@@ -715,7 +745,7 @@ export const TeacherDashboard: React.FC = () => {
               <p className="text-sm mt-1">Create your first quiz to get started.</p>
             </div>
           ) : (
-            <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto pr-2 custom-scrollbar">
+            <div className="space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto pr-2 custom-scrollbar">
               {quizzes.map((q) => (
                 <QuizRow key={q.id ?? q._id} q={q} />
               ))}
@@ -781,11 +811,18 @@ export const TeacherDashboard: React.FC = () => {
       </Modal>
 
       {/* Create Lobby Modal */}
+      <Modal
+        isOpen={createLobbyModalOpen}
+        onClose={() => setCreateLobbyModalOpen(false)}
+        title="Start Quiz Session"
+        maxWidth="sm"
+      >
         <CreateLobbyModal
           quizId={createLobbyQuizId as string}
           onClose={() => setCreateLobbyModalOpen(false)}
           onCreated={onLobbyCreated}
         />
+      </Modal>
 
       {/* Lobby View Overlay */}
       {lobbyOpen && lobbySessionId && (
@@ -822,15 +859,25 @@ export const TeacherDashboard: React.FC = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-4 mb-6">
               <div className="bg-slate-50 dark:bg-slate-700 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{resultsData.totalSubmissions ?? 0}</div>
+                <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
+                  {resultsData.totalSubmissions ?? (resultsData.submissions?.length || 0)}
+                </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">Submissions</div>
               </div>
               <div className="bg-slate-50 dark:bg-slate-700 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{resultsData.averageScore ? Number(resultsData.averageScore).toFixed(1) : "—"}</div>
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                  {resultsData.averageScore 
+                    ? Number(resultsData.averageScore).toFixed(1) 
+                    : (resultsData.submissions?.length 
+                        ? (resultsData.submissions.reduce((acc: number, s: any) => acc + (Number(s.score) || 0), 0) / resultsData.submissions.length).toFixed(1)
+                        : "—")}
+                </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">Avg Score</div>
               </div>
               <div className="bg-slate-50 dark:bg-slate-700 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{resultsData.passRate ? `${Number(resultsData.passRate).toFixed(0)}%` : "—"}</div>
+                <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+                  {resultsData.passRate ? `${Number(resultsData.passRate).toFixed(0)}%` : "—"}
+                </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">Pass Rate</div>
               </div>
             </div>
@@ -840,24 +887,37 @@ export const TeacherDashboard: React.FC = () => {
                 <thead className="bg-slate-50 dark:bg-slate-800">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Student</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">MIS</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Score</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Submitted</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-slate-900 divide-y divide-slate-200 dark:divide-slate-700">
-                  {(resultsData.submissions ?? []).map((sub: any, i: number) => (
-                    <tr key={i}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900 dark:text-white">
-                        {sub.studentName ?? sub.studentEmail ?? "Anonymous"}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
-                        {sub.score} / {sub.totalQuestions}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
-                        {new Date(sub.submittedAt).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
+                  {(resultsData.submissions ?? []).map((sub: any, i: number) => {
+                    // Robust data extraction
+                    const name = sub.studentName ?? sub.name ?? sub.student_name ?? sub.student?.name ?? sub.studentEmail ?? sub.email ?? "Anonymous";
+                    const mis = sub.mis ?? sub.studentMis ?? sub.student_mis ?? sub.student?.mis ?? "—";
+                    const score = sub.score ?? sub.points ?? 0;
+                    const total = sub.totalQuestions ?? sub.total ?? resultsData.totalQuestions ?? "?";
+                    const dateStr = sub.submittedAt ?? sub.submitted_at ?? sub.createdAt ?? sub.created_at;
+                    
+                    return (
+                      <tr key={i}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900 dark:text-white">
+                          {name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400 font-mono">
+                          {mis}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-white font-bold">
+                          {score} <span className="text-slate-400 font-normal">/ {total}</span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
+                          {dateStr ? new Date(dateStr).toLocaleDateString() + " " + new Date(dateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
