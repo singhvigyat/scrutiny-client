@@ -1,5 +1,5 @@
 // src/components/LobbyView.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useSessionPoll } from "../hooks/useSessionPoll";
 import { supabase } from "../lib/supabaseClient";
 import { Button } from "./ui/Button";
@@ -8,6 +8,7 @@ import { Users, Play, Square, Clock, Hash, Info } from "lucide-react";
 
 interface Props {
   sessionId: string;
+  initialPin?: string | null;
   role: "teacher" | "student";
   onClose?: () => void;
   onSessionStarted?: (session: any) => void;
@@ -69,6 +70,7 @@ function normalizeSession(raw: RawSession) {
 
 export default function LobbyView({
   sessionId,
+  initialPin,
   role,
   onClose,
   onSessionStarted,
@@ -78,6 +80,9 @@ export default function LobbyView({
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Persist PIN if it was ever seen
+  const [persistentPin, setPersistentPin] = useState<string | null>(initialPin ?? null);
+
   const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
   const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
 
@@ -86,6 +91,9 @@ export default function LobbyView({
     const normalized = normalizeSession(session);
     try {
       if (normalized) {
+        if (normalized.pin) {
+          setPersistentPin(normalized.pin);
+        }
         onSessionUpdate?.(normalized);
       }
     } catch (err) {
@@ -140,6 +148,7 @@ export default function LobbyView({
 
             const full = json?.session ?? json ?? session;
             const normalized = normalizeSession(full);
+            if (normalized?.pin) setPersistentPin(normalized.pin);
             console.log("[LobbyView] fetched session via /status (normalized):", normalized);
             onSessionStarted?.(normalized);
             return;
@@ -179,6 +188,7 @@ export default function LobbyView({
               }
               const full = j?.session ?? j ?? session;
               const normalized = normalizeSession(full);
+              if (normalized?.pin) setPersistentPin(normalized.pin);
               console.log("[LobbyView] fetched session via fallback (normalized):", normalized);
               onSessionStarted?.(normalized);
               return;
@@ -297,6 +307,8 @@ export default function LobbyView({
     }
   };
 
+  const displayPin = persistentPin ?? session?.pin ?? session?.pinCode ?? session?.code ?? null;
+
   return (
     <Card className="max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 dark:border-slate-700">
@@ -306,9 +318,9 @@ export default function LobbyView({
             Session ID
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white font-mono">{session?.id ?? sessionId}</div>
-          {session?.pin && (
+          {displayPin && (
             <div className="inline-flex items-center gap-1 px-2 py-1 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-medium">
-              PIN: {session.pin}
+              PIN: {displayPin}
             </div>
           )}
         </div>
@@ -318,11 +330,10 @@ export default function LobbyView({
             <Info className="w-4 h-4" />
             Status
           </div>
-          <div className={`font-medium px-3 py-1 rounded-full inline-block text-sm ${
-            session?.status === "active" 
-              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
-              : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-          }`}>
+          <div className={`font-medium px-3 py-1 rounded-full inline-block text-sm ${session?.status === "active"
+            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+            : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            }`}>
             {session?.status ?? "unknown"}
           </div>
           {session?.startsAt && (
@@ -342,7 +353,7 @@ export default function LobbyView({
           <Users className="w-4 h-4" />
           Participants ({participants.length})
         </div>
-        
+
         <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700 p-4 min-h-[100px] max-h-[300px] overflow-y-auto">
           {participants.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-400 text-sm py-4">
@@ -367,19 +378,19 @@ export default function LobbyView({
       <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
         {role === "teacher" && (
           <>
-            <Button 
-              onClick={startSession} 
-              disabled={actionLoading || session?.status === "active"} 
+            <Button
+              onClick={startSession}
+              disabled={actionLoading || session?.status === "active"}
               variant="primary"
               loading={actionLoading}
               icon={<Play className="w-4 h-4" />}
             >
               {session?.status === "active" ? "Session Active" : "Start Session"}
             </Button>
-            
-            <Button 
-              onClick={endSession} 
-              disabled={actionLoading || session?.status !== "active"} 
+
+            <Button
+              onClick={endSession}
+              disabled={actionLoading || session?.status !== "active"}
               variant="danger"
               icon={<Square className="w-4 h-4" />}
             >

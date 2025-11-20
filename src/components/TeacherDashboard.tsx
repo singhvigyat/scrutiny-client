@@ -103,9 +103,9 @@ export const TeacherDashboard: React.FC = () => {
       prev.map((q, i) =>
         i === qIdx
           ? {
-              ...q,
-              options: [...q.options, ""],
-            }
+            ...q,
+            options: [...q.options, ""],
+          }
           : q
       )
     );
@@ -600,9 +600,9 @@ export const TeacherDashboard: React.FC = () => {
               {auth.user?.email ?? "—"}
             </div>
             <ThemeToggle />
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleLogout}
               icon={<LogOut className="w-4 h-4" />}
             >
@@ -681,7 +681,7 @@ export const TeacherDashboard: React.FC = () => {
                           </Button>
                         </div>
                       </div>
-                      
+
                       <button
                         type="button"
                         onClick={() => removeQuestion(qi)}
@@ -786,11 +786,10 @@ export const TeacherDashboard: React.FC = () => {
                       return (
                         <div
                           key={oi}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm ${
-                            isCorrect 
-                              ? "bg-green-50 text-green-700 border border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900/30" 
+                          className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm ${isCorrect
+                              ? "bg-green-50 text-green-700 border border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900/30"
                               : "text-slate-600 dark:text-slate-300"
-                          }`}
+                            }`}
                         >
                           <span className={`font-mono font-bold w-6 ${isCorrect ? "text-green-600 dark:text-green-400" : "text-slate-400"}`}>
                             {String.fromCharCode(65 + oi)}.
@@ -835,6 +834,7 @@ export const TeacherDashboard: React.FC = () => {
             </div>
             <LobbyView
               sessionId={lobbySessionId}
+              initialPin={lobbyPin}
               role="teacher"
               onClose={closeLobbyView}
             />
@@ -866,11 +866,11 @@ export const TeacherDashboard: React.FC = () => {
               </div>
               <div className="bg-slate-50 dark:bg-slate-700 p-4 rounded-lg text-center">
                 <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                  {resultsData.averageScore 
-                    ? Number(resultsData.averageScore).toFixed(1) 
-                    : (resultsData.submissions?.length 
-                        ? (resultsData.submissions.reduce((acc: number, s: any) => acc + (Number(s.score) || 0), 0) / resultsData.submissions.length).toFixed(1)
-                        : "—")}
+                  {resultsData.averageScore
+                    ? Number(resultsData.averageScore).toFixed(1)
+                    : (resultsData.submissions?.length
+                      ? (resultsData.submissions.reduce((acc: number, s: any) => acc + (Number(s.score) || 0), 0) / resultsData.submissions.length).toFixed(1)
+                      : "—")}
                 </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">Avg Score</div>
               </div>
@@ -881,7 +881,7 @@ export const TeacherDashboard: React.FC = () => {
                 <div className="text-xs text-slate-500 dark:text-slate-400">Pass Rate</div>
               </div>
             </div>
-            
+
             <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
               <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
                 <thead className="bg-slate-50 dark:bg-slate-800">
@@ -900,7 +900,7 @@ export const TeacherDashboard: React.FC = () => {
                     const score = sub.score ?? sub.points ?? 0;
                     const total = sub.totalQuestions ?? sub.total ?? resultsData.totalQuestions ?? "?";
                     const dateStr = sub.submittedAt ?? sub.submitted_at ?? sub.createdAt ?? sub.created_at;
-                    
+
                     return (
                       <tr key={i}>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900 dark:text-white">
@@ -913,7 +913,7 @@ export const TeacherDashboard: React.FC = () => {
                           {score} <span className="text-slate-400 font-normal">/ {total}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
-                          {dateStr ? new Date(dateStr).toLocaleDateString() + " " + new Date(dateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "—"}
+                          {dateStr ? new Date(dateStr).toLocaleDateString() + " " + new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—"}
                         </td>
                       </tr>
                     );
