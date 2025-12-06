@@ -51,16 +51,8 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
       }
 
       const payload = {
-        answers: Object.entries(answers).map(([qIdx, optIdx]) => {
-          const qIndex = Number(qIdx);
-          const question = quiz.questions[qIndex];
-          return {
-            questionIndex: qIndex,
-            questionId: question?.id ?? question?._id ?? undefined, // Send ID if available
-            selectedOption: optIdx,
-            answer: optIdx,
-            value: question?.options[optIdx] || "",
-          };
+        answers: quiz.questions.map((_: any, i: number) => {
+          return answers[i] !== undefined ? answers[i] : -1;
         }),
       };
       console.log("[StudentQuizView] Submitting payload:", payload);
