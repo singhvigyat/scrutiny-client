@@ -13,6 +13,12 @@ interface Props {
 
 export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) {
   const [submittedResult, setSubmittedResult] = useState<any | null>(null);
+  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
+  const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
 
   const handleOptionSelect = (qIndex: number, optIndex: number) => {
     setAnswers((prev) => ({ ...prev, [qIndex]: optIndex }));
@@ -86,7 +92,7 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
 
       console.log("Submission successful:", json);
       setSubmittedResult(json);
-      
+
       // Notify parent to clear quiz view (optional, maybe wait for user to click "Done")
       // if (onComplete && quiz.id) {
       //   onComplete(String(quiz.id));
@@ -106,7 +112,7 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
         <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 mb-4">
           <CheckCircle className="w-10 h-10" />
         </div>
-        
+
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Quiz Submitted!</h2>
         <p className="text-slate-600 dark:text-slate-400">
           Your answers have been successfully sent to the server.
@@ -121,8 +127,8 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
         </Card>
 
         <div className="pt-8">
-          <Button 
-            size="lg" 
+          <Button
+            size="lg"
             className="w-full"
             onClick={() => {
               if (onComplete && quiz.id) {
@@ -162,7 +168,7 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
                 <div className="absolute top-0 left-0 w-full h-full bg-green-500"></div>
               )}
             </div>
-            
+
             <div className="pl-4">
               <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-4">
                 <span className="text-slate-400 mr-2">{i + 1}.</span>
@@ -175,11 +181,10 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
                   return (
                     <label
                       key={optIdx}
-                      className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all ${
-                        isSelected
+                      className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all ${isSelected
                           ? "bg-indigo-50 border-indigo-500 dark:bg-indigo-900/20 dark:border-indigo-500 ring-1 ring-indigo-500"
                           : "bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                      }`}
+                        }`}
                     >
                       <input
                         type="radio"
