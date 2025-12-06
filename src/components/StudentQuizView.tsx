@@ -12,13 +12,7 @@ interface Props {
 }
 
 export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) {
-  // answers: map of questionIndex -> optionIndex
-  const [answers, setAnswers] = useState<Record<number, number>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || "";
-  const apiBase = BACKEND_URL ? BACKEND_URL.replace(/\/$/, "") : "/api";
+  const [submittedResult, setSubmittedResult] = useState<any | null>(null);
 
   const handleOptionSelect = (qIndex: number, optIndex: number) => {
     setAnswers((prev) => ({ ...prev, [qIndex]: optIndex }));
@@ -51,11 +45,19 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
       }
 
       const payload = {
-        answers: Object.entries(answers).map(([qIdx, optIdx]) => ({
-          questionIndex: Number(qIdx),
-          selectedOption: optIdx,
-        })),
+        answers: Object.entries(answers).map(([qIdx, optIdx]) => {
+          const qIndex = Number(qIdx);
+          const question = quiz.questions[qIndex];
+          return {
+            questionIndex: qIndex,
+            questionId: question?.id ?? question?._id ?? undefined, // Send ID if available
+            selectedOption: optIdx,
+            answer: optIdx,
+            value: question?.options[optIdx] || "",
+          };
+        }),
       };
+      console.log("[StudentQuizView] Submitting payload:", payload);
 
       const resp = await fetch(`${apiBase}/api/sessions/${encodeURIComponent(sessionId)}/submit`, {
         method: "POST",
@@ -83,12 +85,12 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
       }
 
       console.log("Submission successful:", json);
-      alert(`Quiz submitted! Your score: ${json.score ?? "?"}/${json.totalQuestions ?? "?"}`);
+      setSubmittedResult(json);
       
-      // Notify parent to clear quiz view
-      if (onComplete && quiz.id) {
-        onComplete(String(quiz.id));
-      }
+      // Notify parent to clear quiz view (optional, maybe wait for user to click "Done")
+      // if (onComplete && quiz.id) {
+      //   onComplete(String(quiz.id));
+      // }
     } catch (err: any) {
       console.error("Submit error:", err);
       setError("Network error: " + err.message);
@@ -97,6 +99,43 @@ export default function StudentQuizView({ quiz, sessionId, onComplete }: Props) 
   };
 
   if (!quiz) return <div className="p-6 text-center text-slate-500">Loading quiz...</div>;
+
+  if (submittedResult) {
+    return (
+      <div className="max-w-md mx-auto pt-12 text-center space-y-6">
+        <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 mb-4">
+          <CheckCircle className="w-10 h-10" />
+        </div>
+        
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Quiz Submitted!</h2>
+        <p className="text-slate-600 dark:text-slate-400">
+          Your answers have been successfully sent to the server.
+        </p>
+
+        <Card className="mt-8 bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700">
+          <div className="text-sm text-slate-500 dark:text-slate-400 uppercase tracking-wider font-medium mb-2">Your Score</div>
+          <div className="text-5xl font-bold text-indigo-600 dark:text-indigo-400">
+            {submittedResult.score ?? 0}
+            <span className="text-2xl text-slate-400 dark:text-slate-500 font-normal"> / {submittedResult.totalQuestions ?? quiz.questions?.length ?? "?"}</span>
+          </div>
+        </Card>
+
+        <div className="pt-8">
+          <Button 
+            size="lg" 
+            className="w-full"
+            onClick={() => {
+              if (onComplete && quiz.id) {
+                onComplete(String(quiz.id));
+              }
+            }}
+          >
+            Return to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const questions = quiz.questions || [];
 
